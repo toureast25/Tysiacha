@@ -387,9 +387,11 @@ const Game: React.FC<GameProps> = ({ roomCode, playerCount, onExit }) => {
         });
         
         const currentPlayer = newPlayers[state.currentPlayerIndex];
-        // FIX: Operator '+' cannot be applied to types 'string | number' and 'number'.
+        // FIX: Operator '+' cannot be applied to types 'string | number'.
         // Safely sum scores by treating non-numeric values as 0.
-        const totalScore = currentPlayer.scores.reduce((sum, s) => sum + (typeof s === 'number' ? s : 0), 0);
+        const totalScore = currentPlayer.scores
+          .filter((s): s is number => typeof s === 'number')
+          .reduce((sum, s) => sum + s, 0);
         
         if (totalScore >= 1000) {
           return {
@@ -639,9 +641,11 @@ const Game: React.FC<GameProps> = ({ roomCode, playerCount, onExit }) => {
                 <tfoot className="sticky bottom-0 bg-slate-800 font-bold text-white border-t-2 border-slate-500">
                   <tr>
                     {state.players.map((player, index) => {
-                      // FIX: Operator '+' cannot be applied to types 'string | number' and 'number'.
+                      // FIX: Operator '+' cannot be applied to types 'string | number'.
                       // Safely sum scores by treating non-numeric values as 0.
-                      const totalScore = player.scores.reduce((sum, s) => sum + (typeof s === 'number' ? s : 0), 0);
+                      const totalScore = player.scores
+                        .filter((s): s is number => typeof s === 'number')
+                        .reduce((sum, s) => sum + s, 0);
                       return (
                           <td key={player.id} className={`h-10 px-2 text-center text-lg font-mono align-middle transition-colors duration-300 ${index === state.currentPlayerIndex && !state.isGameOver ? 'bg-yellow-400/80 text-slate-900' : 'bg-slate-900/50'}`}>
                             {totalScore}
