@@ -1,5 +1,5 @@
 import React, { useReducer, useState } from 'react';
-import RulesModal from './RulesModal';
+import RulesModal from './RulesModal.tsx';
 
 // --- Interfaces and Types ---
 interface Player {

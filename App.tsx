@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
-import Lobby from './components/Lobby';
-import Game from './components/Game';
+import Lobby from './components/Lobby.tsx';
+import Game from './components/Game.tsx';
 
 type GameScreen = 'MENU' | 'LOBBY' | 'GAME';
 
