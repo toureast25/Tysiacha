@@ -1,3 +1,4 @@
+
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 
@@ -483,7 +484,7 @@ const SmallDiceIcon = ({ value }) => {
 
 const createInitialState = (pCount) => {
   return {
-    players: Array.from({ length: pCount }, (_, i) => ({ id: i, name: `Игрок ${i + 1}`, scores: [] })),
+    players: Array.from({ length: pCount }, (_, i) => ({ id: i, name: `Игрок ${i + 1}`, scores: [], isClaimed: false })),
     currentPlayerIndex: 0,
     diceOnBoard: [],
     keptDiceThisTurn: [],
@@ -492,7 +493,7 @@ const createInitialState = (pCount) => {
     scoreFromPreviousRolls: 0,
     currentTurnScore: 0,
     potentialScore: 0,
-    gameMessage: `Ход Игрока 1. Бросайте кости!`,
+    gameMessage: `Ожидание игроков...`,
     isGameOver: false,
     canRoll: true,
     canBank: false,
@@ -567,6 +568,12 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
   const handleRollDice = () => {
     const state = gameState;
     if (!state.canRoll || state.isGameOver) return;
+
+    const claimedPlayerCount = state.players.filter(p => p.isClaimed).length;
+    if (claimedPlayerCount < 2 && state.players.every(p => p.scores.length === 0)) {
+        publishState({ ...state, gameMessage: "Нужно как минимум 2 игрока, чтобы начать игру." });
+        return;
+    }
 
     const isHotDiceRoll = state.keptDiceThisTurn.length >= 5;
     const diceToRollCount = isHotDiceRoll ? 5 : 5 - state.keptDiceThisTurn.length;
@@ -722,13 +729,38 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
     publishState({ ...createInitialState(playerCount), players: newPlayers, currentPlayerIndex: nextPlayerIndex, gameMessage: `${newPlayers[state.currentPlayerIndex].name} записал ${finalTurnScore} очков. Ход Игрока ${nextPlayerIndex + 1}.`});
   };
 
-  const handleNewGame = () => publishState(createInitialState(playerCount));
+  const handleNewGame = () => {
+      const newInitialState = createInitialState(playerCount);
+      // Keep claimed players
+      const newPlayers = newInitialState.players.map((p, i) => {
+          const oldPlayer = gameState.players[i];
+          if (oldPlayer && oldPlayer.isClaimed) {
+              return { ...p, name: oldPlayer.name, isClaimed: true };
+          }
+          return p;
+      });
+      publishState({ ...newInitialState, players: newPlayers });
+  };
+
 
   const handleJoin = (playerIndex) => {
-    if(myPlayerId !== null) return;
-    const newPlayers = gameState.players.map((p, i) => i === playerIndex ? {...p, name: playerName} : p);
+    const state = gameState;
+    if (myPlayerId !== null || state.players[playerIndex].isClaimed) return;
+
+    const newPlayers = state.players.map((p, i) => {
+      if (i === playerIndex) {
+        return { ...p, name: playerName, isClaimed: true, scores: [] };
+      }
+      return p;
+    });
+
+    const claimedPlayerCount = newPlayers.filter(p => p.isClaimed).length;
+    const gameMessage = claimedPlayerCount > 1
+        ? `Ход Игрока ${state.currentPlayerIndex + 1}. Бросайте кости!`
+        : `Ожидание игроков...`;
+
     setMyPlayerId(playerIndex);
-    publishState({...gameState, players: newPlayers});
+    publishState({ ...state, players: newPlayers, gameMessage });
   };
 
   const handleDragStart = (e, index) => {
@@ -802,15 +834,14 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
             React.createElement('table', { className: "w-full text-sm text-left text-gray-300" },
               React.createElement('thead', { className: "text-xs text-yellow-300 uppercase bg-slate-800 sticky top-0 z-10" },
                 React.createElement('tr', null, gameState.players.map((player, index) =>
-                  React.createElement('th', { key: player.id, scope: "col", className: `h-10 px-2 text-center align-middle transition-all duration-300 relative ${index === gameState.currentPlayerIndex && !gameState.isGameOver ? 'bg-yellow-400 text-slate-900' : 'bg-slate-700/50'} ${index === myPlayerId ? 'outline outline-2 outline-blue-400' : ''}` },
-                    player.name,
-                    player.name.startsWith('Игрок ') && myPlayerId === null && React.createElement(
-                      'button', { onClick: () => handleJoin(index), className: "absolute right-1 top-1/2 -translate-y-1/2 text-xs bg-green-600 hover:bg-green-700 px-2 py-1 rounded" }, "Войти"
-                    )
+                  React.createElement('th', { key: player.id, scope: "col", className: `h-10 px-0 py-0 text-center align-middle transition-all duration-300 relative ${index === gameState.currentPlayerIndex && !gameState.isGameOver ? 'bg-yellow-400 text-slate-900' : 'bg-slate-700/50'} ${index === myPlayerId ? 'outline outline-2 outline-blue-400' : ''}` },
+                    !player.isClaimed && myPlayerId === null 
+                      ? React.createElement('button', { onClick: () => handleJoin(index), className: "w-full h-full bg-green-600 hover:bg-green-700 font-bold text-white transition-colors" }, "Войти")
+                      : React.createElement('span', { className: "px-2" }, player.name)
                   )
                 ))
               ),
-              React.createElement('tbody', { className: isScoreboardExpanded ? '' : 'hidden lg:table-row-group' },
+              React.createElement('tbody', { className: `lg:table-row-group ${isScoreboardExpanded ? '' : 'hidden'}` },
                 (() => {
                   const maxRounds = gameState.players.reduce((max, p) => Math.max(max, p.scores.length), 0);
                   if (maxRounds === 0) return React.createElement('tr', null, React.createElement('td', { colSpan: playerCount, className: "py-4 px-2 text-center text-gray-400 italic" }, 'Еще не было записано очков.'));
