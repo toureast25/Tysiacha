@@ -1,0 +1,21 @@
+{
+  "short_name": "Тысяча",
+  "name": "Тысяча - Онлайн Игра в Кости",
+  "description": "Рубанись в камни со Стёпиным! Классическая игра в кости 'Тысяча'. Создавайте игровые комнаты, приглашайте друзей по коду и бросайте кости. Цель - первым набрать 1000 очков.",
+  "icons": [
+    {
+      "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxOTIgMTkyIiB3aWR0aD0iMTkyIiBoZWlnaHQ9IjE5MiI+PGcgZmlsbD0ibm9uZSIgc3Ryb2tlPSJub25lIj48cmVjdCB3aWR0aD0iMTkyIiBoZWlnaHQ9IjE5MiIgcng9IjMyIiBmaWxsPSIjZjRmN2U0Ii8+PGNpcmNsZSBjeD0iNjAiIGN5PSI2MCIgcj0iMTYiIGZpbGw9IiMxYTFhMWEiLz48Y2lyY2xlIGN4PSIxMzIiIGN5PSI2MCIgcj0iMTYiIGZpbGw9IiMxYTFhMWEiLz48Y2lyY2xlIGN4PSI5NiIgY3k9Ijk2IiByPSIxNiIgZmlsbD0iIzFhMWExYSIvPjxjaXJjbGUgY3g9IjYwIiBjeT0iMTMyIiByPSIxNiIgZmlsbD0iIzFhMWExYSIvPjxjaXJjbGUgY3g9IjEzMiIgY3k9IjEzMiIgcj0iMTYiIGZpbGw9IiMxYTFhMWEiLz48L2c+PC9zdmc+",
+      "type": "image/svg+xml",
+      "sizes": "192x192"
+    },
+    {
+      "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIiB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiI+PGcgZmlsbD0ibm9uZSIgc3Ryb2tlPSJub25lIj48cmVjdCB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiIgcng9IjY0IiBmaWxsPSIjZjRmN2U0Ii8+PGNpcmNsZSBjeD0iMTYwIiBjeT0iMTYwIiByPSI0MiIgZmlsbD0iIzFhMWExYSIvPjxjaXJjbGUgY3g9IjM1MiIgY3k9IjE2MCIgcj0iNDIiIGZpbGw9IiMxYTFhMWEiLz48Y2lyY2xlIGN4PSIyNTYiIGN5PSIyNTYiIHI9IjQyIiBmaWxsPSIjMWExYTFiYSIvPjxjaXJjbGUgY3g9IjE2MCIgY3k9IjM1MiIgcj0iNDIiIGZpbGw9IiMxYTFhMWEiLz48Y2lyY2xlIGN4PSIzNTIiIGN5PSIzNTIiIHI9IjQyIiBmaWxsPSIjMWExYTFiYSIvPjwvZz48L3N2Zz4=",
+      "type": "image/svg+xml",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#1a1a1a",
+  "background_color": "#1a1a1a"
+}
