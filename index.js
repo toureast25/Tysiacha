@@ -513,6 +513,7 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
   
   const mqttClientRef = useRef(null);
   const topic = `${MQTT_TOPIC_PREFIX}/${roomCode}`;
+  const isStateReceivedRef = useRef(false);
   
   const publishState = useCallback((newState) => {
     if (mqttClientRef.current && mqttClientRef.current.connected) {
@@ -524,6 +525,7 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
   useEffect(() => {
     const client = mqtt.connect(MQTT_BROKER_URL);
     mqttClientRef.current = client;
+    isStateReceivedRef.current = false; // Reset on each connection attempt
 
     client.on('connect', () => {
       setConnectionStatus('connected');
@@ -532,7 +534,7 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
           // After subscribing, wait a moment to see if a state exists.
           // If not, this client is the host and creates the initial state.
           setTimeout(() => {
-            if (!gameState) { // This client is the creator
+            if (!isStateReceivedRef.current) { // Check ref to avoid race condition
                 const initialState = createInitialState(playerCount);
                 initialState.players[0] = {
                     ...initialState.players[0],
@@ -542,15 +544,25 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
                 };
                 setMyPlayerId(0); // Creator is player 0
                 initialState.gameMessage = `${playerName} создал(а) игру. Ожидание других игроков...`;
-                publishState(initialState);
+                
+                const stateWithVersion = { ...initialState, version: 1 };
+                
+                // Set local state immediately for the host for instant UI update
+                setGameState(stateWithVersion);
+                
+                // Manually publish to avoid dependency cycle with publishState callback
+                if (client.connected) {
+                    client.publish(topic, JSON.stringify(stateWithVersion), { retain: true });
+                }
             }
-          }, 1000);
+          }, 1500); // A slightly longer timeout to be safe
         }
       });
     });
     
     client.on('message', (receivedTopic, message) => {
       if (receivedTopic === topic) {
+        isStateReceivedRef.current = true; // Mark that state has been received
         try {
           const receivedState = JSON.parse(message.toString());
           setGameState(state => {
@@ -570,7 +582,7 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
     return () => {
       if (client) client.end();
     };
-  }, [roomCode, playerCount]); // Deliberately not including gameState/publishState to avoid loops
+  }, [roomCode, playerCount, playerName]);
 
 
   // --- Game Logic Actions ---
