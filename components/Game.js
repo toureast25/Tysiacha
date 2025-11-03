@@ -20,6 +20,12 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
   const mqttClientRef = useRef(null);
   const isStateReceivedRef = useRef(false);
   const lastSeenTimestampsRef = useRef({});
+  const gameStateRef = useRef(); // Ref to hold the latest game state for intervals/callbacks
+
+  // Keep the ref updated with the latest state
+  useEffect(() => {
+    gameStateRef.current = gameState;
+  }, [gameState]);
 
   useEffect(() => {
     if (playerName) {
@@ -47,10 +53,11 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
 
   const publishState = useCallback((newState) => {
     if (mqttClientRef.current && mqttClientRef.current.connected) {
-      const stateWithVersion = { ...newState, version: (gameState?.version || 0) + 1 };
+      const currentVersion = gameStateRef.current?.version || 0;
+      const stateWithVersion = { ...newState, version: currentVersion + 1 };
       mqttClientRef.current.publish(topic, JSON.stringify(stateWithVersion), { retain: true });
     }
-  }, [topic, gameState]);
+  }, [topic]);
 
   const findNextActivePlayer = useCallback((startIndex, players) => {
       let nextIndex = (startIndex + 1) % players.length;
@@ -142,9 +149,10 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
 
     // Status checking interval (dynamic host)
     const statusCheckInterval = setInterval(() => {
-        if (!gameState) return;
+        const localGameState = gameStateRef.current; // Use state from ref to avoid stale closures
+        if (!localGameState) return;
 
-        const activePlayers = gameState.players.filter(p => p.isClaimed && !p.isSpectator);
+        const activePlayers = localGameState.players.filter(p => p.isClaimed && !p.isSpectator);
         if (activePlayers.length === 0) return;
 
         const activeHostId = activePlayers.map(p => p.id).sort((a, b) => a - b)[0];
@@ -154,7 +162,7 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
             let needsUpdate = false;
             const activePlayersCountBeforeUpdate = activePlayers.length;
 
-            const newPlayers = gameState.players.map(p => {
+            const newPlayers = localGameState.players.map(p => {
                 const playerCopy = {...p}; // Work on a copy
                 if (!playerCopy.isClaimed || playerCopy.isSpectator) return playerCopy;
                 
@@ -185,9 +193,9 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
             
             const remainingPlayersAfterUpdate = newPlayers.filter(p => p.isClaimed && !p.isSpectator);
             
-            if (remainingPlayersAfterUpdate.length === 1 && activePlayersCountBeforeUpdate > 1 && !gameState.isGameOver) {
+            if (remainingPlayersAfterUpdate.length === 1 && activePlayersCountBeforeUpdate > 1 && !localGameState.isGameOver) {
                  publishState({
-                    ...gameState,
+                    ...localGameState,
                     players: newPlayers,
                     isGameOver: true,
                     gameMessage: `${remainingPlayersAfterUpdate[0].name} победил, так как все остальные игроки вышли!`,
@@ -196,7 +204,7 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
             }
 
             if (needsUpdate) {
-                publishState({ ...gameState, players: newPlayers });
+                publishState({ ...localGameState, players: newPlayers });
             }
         }
     }, 2000);
@@ -210,7 +218,7 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
       clearInterval(statusCheckInterval);
       if (client) client.end();
     };
-  }, [roomCode, playerCount, playerName]); // Dependencies are correct
+  }, [roomCode, playerCount, playerName, publishState]); // Dependencies are correct
 
 
   // --- Game Logic Actions ---
