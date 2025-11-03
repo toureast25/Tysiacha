@@ -1,4 +1,4 @@
-
+// 
 // Утилиты игровой логики
 export const analyzeDice = (dice) => {
     const scoringGroups = [];

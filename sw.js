@@ -1,3 +1,4 @@
+// 
 // Service Worker для кэширования ресурсов PWA
 
 const CACHE_NAME = 'tysiacha-cache-v1';

@@ -1,3 +1,4 @@
+// 
 import React from 'react';
 import { MQTT_BROKER_URL, MQTT_TOPIC_PREFIX } from '../constants.js';
 import { analyzeDice, validateSelection, calculateTotalScore, createInitialState } from '../utils/gameLogic.js';
