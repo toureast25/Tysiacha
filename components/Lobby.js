@@ -7,7 +7,8 @@ const Lobby = ({ onStartGame }) => {
   const [roomCode, setRoomCode] = useState('');
   const [playerCount, setPlayerCount] = useState(2);
   const [playerName, setPlayerName] = useState('');
-  const [isJoining, setIsJoining] = useState(false);
+  // Initialize state based on localStorage to avoid race conditions on mount
+  const [isJoining, setIsJoining] = useState(() => !!localStorage.getItem('tysiacha-lastRoom'));
   const [roomStatus, setRoomStatus] = useState(null); // { status: 'loading' | 'active' | 'waiting' | 'not_found', host: 'name', message: '...' }
 
   useEffect(() => {
@@ -19,7 +20,7 @@ const Lobby = ({ onStartGame }) => {
     const lastRoom = localStorage.getItem('tysiacha-lastRoom');
     if(lastRoom) {
       setRoomCode(lastRoom);
-      setIsJoining(true);
+      // setIsJoining is already handled by the useState initializer
     }
   }, []);
 

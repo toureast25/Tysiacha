@@ -110,10 +110,14 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
                 const receivedState = JSON.parse(message.toString());
                 setGameState(state => {
                     if (!state || receivedState.version > state.version) {
-                        // Check if I have been made a spectator by timeout
+                        // Check if I have been made a spectator by timeout (this logic is now deprecated by slot reset)
                         if(myPlayerId !== null && receivedState.players[myPlayerId]?.isSpectator){
                             setIsSpectator(true);
                             localStorage.removeItem('tysiacha-session');
+                        }
+                        // Check if my slot has been reset
+                         if(myPlayerId !== null && !receivedState.players[myPlayerId]?.isClaimed){
+                            onExit(); // Go to lobby if kicked
                         }
                         return receivedState;
                     }
@@ -155,13 +159,16 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
                 if (!playerCopy.isClaimed || playerCopy.isSpectator) return playerCopy;
                 
                 const lastSeen = lastSeenTimestampsRef.current[playerCopy.id] || 0;
-                let newStatus = playerCopy.status;
-
-                if (now - lastSeen > 600000 && !playerCopy.isSpectator) { // 10 minutes timeout
-                    newStatus = 'disconnected';
-                    playerCopy.isSpectator = true; 
+                
+                if (now - lastSeen > 600000) { // 10 minutes timeout
                     needsUpdate = true;
-                } else if (now - lastSeen > 60000) { // 60 seconds
+                    // Reset the player slot instead of making them a spectator
+                    const initialPlayerState = createInitialState(playerCount).players[playerCopy.id];
+                    return { ...initialPlayerState, id: playerCopy.id };
+                }
+
+                let newStatus = playerCopy.status;
+                if (now - lastSeen > 60000) { // 60 seconds
                     newStatus = 'disconnected';
                 } else if (now - lastSeen > 10000) { // 10 seconds
                     newStatus = 'away';
@@ -210,6 +217,12 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
   const handleRollDice = () => {
     const state = gameState;
     if (!state.canRoll || state.isGameOver) return;
+    
+    // First move can only be made by the host (player 0)
+    const isFirstMoveEver = state.players.every(p => p.scores.length === 0);
+    if (isFirstMoveEver && myPlayerId !== 0) {
+      return; // Should be blocked by UI, but this is a safeguard
+    }
 
     const claimedPlayerCount = state.players.filter(p => p.isClaimed && !p.isSpectator).length;
     if (claimedPlayerCount < 2 && state.players.every(p => p.scores.length === 0)) {
@@ -393,6 +406,8 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
   }
 
   const handleNewGame = () => {
+      if (myPlayerId !== 0) return; // Only host can start a new game
+
       const newInitialState = createInitialState(playerCount);
       const newPlayers = newInitialState.players.map((p, i) => {
           const oldPlayer = gameState.players[i];
@@ -426,44 +441,58 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
     publishState({ ...state, players: newPlayers, gameMessage });
   };
   
-  const handleLeaveAndSpectate = () => {
-      if (myPlayerId === null) return;
-
-      const me = gameState.players[myPlayerId];
-      const newPlayers = gameState.players.map(p => p.id === myPlayerId ? {...p, isSpectator: true, isClaimed: false } : p);
-      const newSpectators = [...gameState.spectators, { name: me.name, score: calculateTotalScore(me) }];
-
-      let nextPlayerIndex = gameState.currentPlayerIndex;
-      if (myPlayerId === gameState.currentPlayerIndex) {
-          nextPlayerIndex = findNextActivePlayer(gameState.currentPlayerIndex, newPlayers);
+  const handleLeaveGame = () => {
+      if (myPlayerId === null || isSpectator) {
+        onExit(); // If spectator or not really in game, just exit to lobby
+        return;
       }
       
-      const claimedPlayerCountBeforeLeave = gameState.players.filter(p => p.isClaimed && !p.isSpectator).length;
+      const state = gameState;
+      const me = state.players[myPlayerId];
+      const initialPlayerState = createInitialState(playerCount).players[myPlayerId];
+      const newPlayers = state.players.map(p => 
+        p.id === myPlayerId 
+        ? { ...initialPlayerState, id: myPlayerId } // Reset player slot
+        : p
+      );
+      
+      let nextPlayerIndex = state.currentPlayerIndex;
+      // If the current player is the one leaving, find the next active player
+      if (myPlayerId === state.currentPlayerIndex) {
+          nextPlayerIndex = findNextActivePlayer(state.currentPlayerIndex, newPlayers);
+      }
+      
       const remainingPlayers = newPlayers.filter(p => p.isClaimed && !p.isSpectator);
+      const activePlayersBeforeLeave = state.players.filter(p => p.isClaimed && !p.isSpectator).length;
       
       let finalState;
 
-      if (remainingPlayers.length === 1 && claimedPlayerCountBeforeLeave > 1) {
+      // If only one player remains, they win.
+      if (remainingPlayers.length === 1 && activePlayersBeforeLeave > 1) {
           finalState = {
-              ...gameState,
+              ...state,
               players: newPlayers,
-              spectators: newSpectators,
+              spectators: state.spectators,
               isGameOver: true,
               gameMessage: `${remainingPlayers[0].name} победил, так как все остальные игроки вышли!`,
           };
-      } else {
+      } else if (remainingPlayers.length === 0) {
+          // If the last player leaves, reset the game state entirely
+          finalState = createInitialState(playerCount);
+          finalState.gameMessage = 'Все игроки вышли. Игра окончена.';
+      }
+      else {
           finalState = {
-              ...gameState,
+              ...state,
               players: newPlayers,
-              spectators: newSpectators,
-              currentPlayerIndex: nextPlayerIndex
+              spectators: state.spectators,
+              currentPlayerIndex: nextPlayerIndex,
+              gameMessage: `${me.name} покинул(а) игру.`,
           };
       }
       
       publishState(finalState);
-      
-      setIsSpectator(true);
-      localStorage.removeItem('tysiacha-session');
+      onExit(); // Go back to lobby
   };
 
   const handleDragStart = (e, index) => {
@@ -521,6 +550,7 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
   }
 
   const isMyTurn = myPlayerId === gameState.currentPlayerIndex && !isSpectator;
+  const isHost = myPlayerId === 0;
   const rollButtonText = (gameState.keptDiceThisTurn.length >= 5 ? 5 : 5 - gameState.keptDiceThisTurn.length) === 5 
     ? 'Бросить все' : `Бросить ${5 - gameState.keptDiceThisTurn.length}`;
   const firstAvailableSlotIndex = gameState.players.findIndex(p => !p.isClaimed && !p.isSpectator);
@@ -528,6 +558,13 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
   const currentPlayer = gameState.players[gameState.currentPlayerIndex];
   const isCurrentPlayerInactive = currentPlayer && (currentPlayer.status === 'away' || currentPlayer.status === 'disconnected');
   const showSkipButton = !isMyTurn && isCurrentPlayerInactive && !gameState.isGameOver && (Date.now() - gameState.turnStartTime > 60000);
+
+  const isFirstMoveEver = gameState.players.every(p => p.scores.length === 0);
+
+  let displayMessage = gameState.gameMessage;
+  if (gameState.isGameOver && !isHost) {
+      displayMessage = `${gameState.gameMessage} Ожидание, пока хост начнет новую игру.`;
+  }
 
   return React.createElement(
     React.Fragment,
@@ -539,7 +576,7 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
       React.createElement('header', { className: "flex justify-between items-center mb-4 flex-shrink-0" },
         React.createElement('div', { className: "p-2 bg-black/50 rounded-lg text-sm" }, React.createElement('p', { className: "font-mono" }, `КОД КОМНАТЫ: ${roomCode}`)),
         React.createElement('h1', { onClick: () => setShowRules(true), className: "font-ruslan text-4xl text-yellow-300 cursor-pointer hover:text-yellow-200 transition-colors", title: "Показать правила" }, 'ТЫСЯЧА'),
-        React.createElement('button', { onClick: isSpectator ? onExit : handleLeaveAndSpectate, className: "px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg font-bold" }, isSpectator ? 'Вернуться в лобби' : 'Покинуть игру')
+        React.createElement('button', { onClick: handleLeaveGame, className: "px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg font-bold" }, isSpectator ? 'Вернуться в лобби' : 'Выйти из игры')
       ),
       React.createElement('div', { className: "flex-grow flex flex-col lg:grid lg:grid-cols-4 gap-4 min-h-0" },
         React.createElement('aside', { className: `lg:col-span-1 bg-slate-800/80 p-4 rounded-xl border border-slate-700 flex flex-col transition-all duration-500 ease-in-out ${isScoreboardExpanded ? 'h-full' : 'flex-shrink-0'}` },
@@ -605,7 +642,7 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
         React.createElement('main', { className: `relative flex-grow lg:col-span-3 bg-slate-900/70 rounded-xl border-2 flex flex-col justify-between transition-all duration-300 min-h-0 ${isDragOver && isMyTurn ? 'border-green-400 shadow-2xl shadow-green-400/20' : 'border-slate-600'} p-4`, onDragOver: (e) => {e.preventDefault(); setIsDragOver(true);}, onDrop: handleDrop, onDragLeave: () => setIsDragOver(false) },
           React.createElement('div', { className: "w-full" },
             React.createElement('div', { className: `w-full p-3 mb-4 text-center rounded-lg ${gameState.isGameOver ? 'bg-green-600' : 'bg-slate-800'} border border-slate-600 flex items-center justify-center min-h-[72px]` },
-              React.createElement('p', { className: "text-lg font-semibold" }, gameState.gameMessage)
+              React.createElement('p', { className: "text-lg font-semibold" }, displayMessage)
             ),
             React.createElement('div', { className: "w-full flex justify-center md:justify-end" },
               React.createElement('div', { className: "p-3 rounded-lg bg-black/40 border border-slate-700 w-full md:w-auto md:min-w-[300px]" },
@@ -631,9 +668,9 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
             ),
             React.createElement('div', { className: "max-w-2xl mx-auto" },
               gameState.isGameOver
-                ? React.createElement('button', { onClick: handleNewGame, className: "w-full py-4 bg-blue-600 hover:bg-blue-700 rounded-lg text-2xl font-bold uppercase tracking-wider transition-all duration-300 transform hover:scale-105 shadow-lg" }, 'Новая Игра')
+                ? React.createElement('button', { onClick: handleNewGame, disabled: !isHost, className: "w-full py-4 bg-blue-600 hover:bg-blue-700 rounded-lg text-2xl font-bold uppercase tracking-wider transition-all duration-300 transform hover:scale-105 shadow-lg disabled:bg-gray-500 disabled:cursor-not-allowed disabled:scale-100" }, 'Новая Игра')
                 : React.createElement('div', { className: "grid grid-cols-2 gap-4" },
-                    React.createElement('button', { onClick: handleRollDice, disabled: !isMyTurn || !gameState.canRoll, className: "w-full py-3 bg-green-600 hover:bg-green-700 rounded-lg text-xl font-bold uppercase tracking-wider transition-all duration-300 transform hover:scale-105 shadow-lg disabled:bg-gray-500 disabled:cursor-not-allowed disabled:scale-100" }, rollButtonText),
+                    React.createElement('button', { onClick: handleRollDice, disabled: !isMyTurn || !gameState.canRoll || (isFirstMoveEver && myPlayerId !== 0), className: "w-full py-3 bg-green-600 hover:bg-green-700 rounded-lg text-xl font-bold uppercase tracking-wider transition-all duration-300 transform hover:scale-105 shadow-lg disabled:bg-gray-500 disabled:cursor-not-allowed disabled:scale-100" }, rollButtonText),
                     React.createElement('button', { onClick: handleBankScore, disabled: !isMyTurn || !gameState.canBank, className: "w-full py-3 bg-yellow-500 hover:bg-yellow-600 text-slate-900 rounded-lg text-xl font-bold uppercase tracking-wider transition-all duration-300 transform hover:scale-105 shadow-lg disabled:bg-gray-500 disabled:cursor-not-allowed disabled:scale-100" }, 'Записать')
                   )
             )
