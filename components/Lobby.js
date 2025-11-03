@@ -125,7 +125,7 @@ const Lobby = ({ onStartGame }) => {
   return React.createElement(
     'div',
     { className: "w-full max-w-md p-8 bg-slate-800/80 backdrop-blur-md rounded-xl shadow-2xl border border-slate-700 text-center" },
-    React.createElement('h2', { className: "font-ruslan text-5xl text-yellow-300 mb-6" }, isJoining ? 'Присоединиться' : 'Создать Игру'),
+    React.createElement('h2', { className: "font-ruslan text-4xl sm:text-5xl text-yellow-300 mb-6" }, isJoining ? 'Присоединиться' : 'Создать Игру'),
     React.createElement(
       'div',
       { className: "space-y-6" },
