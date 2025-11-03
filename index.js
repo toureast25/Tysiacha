@@ -182,6 +182,14 @@ const Lobby = ({ onStartGame }) => {
   const [isJoining, setIsJoining] = useState(false);
 
   useEffect(() => {
+    // Pre-fill player name from a previous session if it exists
+    const savedName = localStorage.getItem('tysiacha-playerName');
+    if (savedName) {
+        setPlayerName(savedName);
+    }
+  }, []);
+
+  useEffect(() => {
     if (!isJoining) {
       generateRoomCode();
     }
@@ -194,8 +202,10 @@ const Lobby = ({ onStartGame }) => {
 
   const handleStart = () => {
     const finalRoomCode = roomCode.trim();
-    if (finalRoomCode.length >= 4 && playerName.trim().length > 2) {
-      onStartGame(finalRoomCode, playerCount, playerName.trim());
+    const finalPlayerName = playerName.trim();
+    if (finalRoomCode.length >= 4 && finalPlayerName.length > 2) {
+      localStorage.setItem('tysiacha-playerName', finalPlayerName);
+      onStartGame(finalRoomCode, playerCount, finalPlayerName);
     }
   };
 
@@ -258,7 +268,8 @@ const Lobby = ({ onStartGame }) => {
               {
                 key: num,
                 onClick: () => setPlayerCount(num),
-                className: `w-12 h-12 text-xl font-bold rounded-full transition-all ${playerCount === num ? 'bg-yellow-400 text-slate-900 scale-110' : 'bg-slate-700 text-white hover:bg-slate-600'}`
+                disabled: isJoining,
+                className: `w-12 h-12 text-xl font-bold rounded-full transition-all ${playerCount === num && !isJoining ? 'bg-yellow-400 text-slate-900 scale-110' : 'bg-slate-700 text-white hover:bg-slate-600'} ${isJoining ? 'opacity-50 cursor-not-allowed' : ''}`
               },
               num
             )
@@ -485,12 +496,20 @@ const SmallDiceIcon = ({ value }) => {
 
 const createInitialState = (pCount) => {
   return {
-    players: Array.from({ length: pCount }, (_, i) => ({ id: i, name: `Игрок ${i + 1}`, scores: [], isClaimed: false })),
+    players: Array.from({ length: pCount }, (_, i) => ({ 
+        id: i, 
+        name: `Игрок ${i + 1}`, 
+        scores: [], 
+        isClaimed: false,
+        status: 'offline', // 'online', 'away', 'disconnected'
+        isSpectator: false,
+    })),
+    spectators: [],
     currentPlayerIndex: 0,
     diceOnBoard: [],
     keptDiceThisTurn: [],
     diceKeptFromThisRoll: [],
-    selectedDiceIndices: [], // Now an array
+    selectedDiceIndices: [],
     scoreFromPreviousRolls: 0,
     currentTurnScore: 0,
     potentialScore: 0,
@@ -499,22 +518,35 @@ const createInitialState = (pCount) => {
     canRoll: true,
     canBank: false,
     canKeep: false,
-    version: 1, // For state updates
+    turnStartTime: 0,
+    version: 1,
   };
 };
 
 const Game = ({ roomCode, playerCount, playerName, onExit }) => {
   const [gameState, setGameState] = useState(null);
   const [myPlayerId, setMyPlayerId] = useState(null);
+  const [isSpectator, setIsSpectator] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState('connecting');
   const [isScoreboardExpanded, setIsScoreboardExpanded] = useState(false);
   const [showRules, setShowRules] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   
   const mqttClientRef = useRef(null);
-  const topic = `${MQTT_TOPIC_PREFIX}/${roomCode}`;
   const isStateReceivedRef = useRef(false);
+  const lastSeenTimestampsRef = useRef({});
+
+  const topic = `${MQTT_TOPIC_PREFIX}/${roomCode}`;
+  const presenceTopic = `${topic}/presence`;
   
+  // This effect ensures the session is saved when a player ID is assigned
+  useEffect(() => {
+    if (myPlayerId !== null) {
+        const sessionData = { roomCode, playerCount, playerName, myPlayerId };
+        localStorage.setItem('tysiacha-session', JSON.stringify(sessionData));
+    }
+  }, [myPlayerId, roomCode, playerCount, playerName]);
+
   const publishState = useCallback((newState) => {
     if (mqttClientRef.current && mqttClientRef.current.connected) {
       const stateWithVersion = { ...newState, version: (gameState?.version || 0) + 1 };
@@ -522,67 +554,150 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
     }
   }, [topic, gameState]);
 
+  const findNextActivePlayer = useCallback((startIndex, players) => {
+      let nextIndex = (startIndex + 1) % players.length;
+      while (nextIndex !== startIndex) {
+          if (players[nextIndex].isClaimed && !players[nextIndex].isSpectator) {
+              return nextIndex;
+          }
+          nextIndex = (nextIndex + 1) % players.length;
+      }
+      return startIndex; // Only one player left
+  }, []);
+
   useEffect(() => {
     const client = mqtt.connect(MQTT_BROKER_URL);
     mqttClientRef.current = client;
-    isStateReceivedRef.current = false; // Reset on each connection attempt
+    isStateReceivedRef.current = false;
+    
+    // Restore session if available
+    try {
+        const savedSession = localStorage.getItem('tysiacha-session');
+        if (savedSession) {
+            const session = JSON.parse(savedSession);
+            if(session.roomCode === roomCode){
+                setMyPlayerId(session.myPlayerId);
+            }
+        }
+    } catch(e) { console.error("Could not restore session:", e); }
+
 
     client.on('connect', () => {
       setConnectionStatus('connected');
-      client.subscribe(topic, (err) => {
-        if (!err) {
-          // After subscribing, wait a moment to see if a state exists.
-          // If not, this client is the host and creates the initial state.
-          setTimeout(() => {
-            if (!isStateReceivedRef.current) { // Check ref to avoid race condition
-                const initialState = createInitialState(playerCount);
-                initialState.players[0] = {
-                    ...initialState.players[0],
-                    name: playerName,
-                    isClaimed: true,
-                    scores: [],
-                };
-                setMyPlayerId(0); // Creator is player 0
-                initialState.gameMessage = `${playerName} создал(а) игру. Ожидание других игроков...`;
-                
-                const stateWithVersion = { ...initialState, version: 1 };
-                
-                // Set local state immediately for the host for instant UI update
-                setGameState(stateWithVersion);
-                
-                // Manually publish to avoid dependency cycle with publishState callback
-                if (client.connected) {
-                    client.publish(topic, JSON.stringify(stateWithVersion), { retain: true });
-                }
-            }
-          }, 1500); // A slightly longer timeout to be safe
+      client.subscribe(topic);
+      client.subscribe(presenceTopic);
+
+      setTimeout(() => {
+        if (!isStateReceivedRef.current) {
+            const initialState = createInitialState(playerCount);
+            initialState.players[0] = {
+                ...initialState.players[0],
+                name: playerName,
+                isClaimed: true,
+                status: 'online',
+            };
+            setMyPlayerId(0);
+            initialState.gameMessage = `${playerName} создал(а) игру. Ожидание других игроков...`;
+            const stateWithVersion = { ...initialState, version: 1, turnStartTime: Date.now() };
+            setGameState(stateWithVersion);
+            client.publish(topic, JSON.stringify(stateWithVersion), { retain: true });
         }
-      });
+      }, 1500);
     });
     
     client.on('message', (receivedTopic, message) => {
-      if (receivedTopic === topic) {
-        isStateReceivedRef.current = true; // Mark that state has been received
-        try {
-          const receivedState = JSON.parse(message.toString());
-          setGameState(state => {
-            if (!state || receivedState.version > state.version) {
-              return receivedState;
-            }
-            return state;
-          });
-        } catch (e) { console.error('Error parsing game state:', e); }
-      }
+        if (receivedTopic === topic) {
+            isStateReceivedRef.current = true;
+            try {
+                const receivedState = JSON.parse(message.toString());
+                setGameState(state => {
+                    if (!state || receivedState.version > state.version) {
+                        // Check if I have been made a spectator by timeout
+                        if(myPlayerId !== null && receivedState.players[myPlayerId]?.isSpectator){
+                            setIsSpectator(true);
+                            localStorage.removeItem('tysiacha-session');
+                        }
+                        return receivedState;
+                    }
+                    return state;
+                });
+            } catch (e) { console.error('Error parsing game state:', e); }
+        }
+        if (receivedTopic === presenceTopic) {
+             try {
+                const { playerId } = JSON.parse(message.toString());
+                lastSeenTimestampsRef.current[playerId] = Date.now();
+            } catch (e) { /* ignore parse error */ }
+        }
     });
+
+    // Heartbeat interval
+    const heartbeatInterval = setInterval(() => {
+        if (client.connected && myPlayerId !== null && !isSpectator) {
+            client.publish(presenceTopic, JSON.stringify({ playerId: myPlayerId }));
+        }
+    }, 5000);
+
+    // Status checking interval (only player 0 acts as the "host" for this)
+    const statusCheckInterval = setInterval(() => {
+        if (myPlayerId === 0 && gameState) {
+            const now = Date.now();
+            let needsUpdate = false;
+            let activePlayersCount = 0;
+
+            const newPlayers = gameState.players.map(p => {
+                if (!p.isClaimed || p.isSpectator) return p;
+                
+                activePlayersCount++;
+                const lastSeen = lastSeenTimestampsRef.current[p.id] || 0;
+                let newStatus = p.status;
+
+                if (now - lastSeen > 600000) { // 10 minutes timeout
+                    newStatus = 'disconnected';
+                    p.isSpectator = true; // Remove from game
+                    needsUpdate = true;
+                } else if (now - lastSeen > 60000) { // 60 seconds
+                    newStatus = 'disconnected';
+                } else if (now - lastSeen > 10000) { // 10 seconds
+                    newStatus = 'away';
+                } else {
+                    newStatus = 'online';
+                }
+
+                if (newStatus !== p.status) {
+                    needsUpdate = true;
+                    p.status = newStatus;
+                }
+                return p;
+            });
+            
+            const remainingPlayers = newPlayers.filter(p => p.isClaimed && !p.isSpectator);
+            if (remainingPlayers.length === 1 && activePlayersCount > 1 && !gameState.isGameOver) {
+                 publishState({
+                    ...gameState,
+                    players: newPlayers,
+                    isGameOver: true,
+                    gameMessage: `${remainingPlayers[0].name} победил, так как все остальные игроки вышли!`,
+                });
+                return;
+            }
+
+            if (needsUpdate) {
+                publishState({ ...gameState, players: newPlayers });
+            }
+        }
+    }, 2000);
 
     client.on('error', () => setConnectionStatus('error'));
     client.on('offline', () => setConnectionStatus('reconnecting'));
     client.on('reconnect', () => setConnectionStatus('reconnecting'));
 
     return () => {
+      clearInterval(heartbeatInterval);
+      clearInterval(statusCheckInterval);
       if (client) client.end();
     };
-  }, [roomCode, playerCount, playerName]);
+  }, [roomCode, playerCount, playerName]); // Dependencies are correct
 
 
   // --- Game Logic Actions ---
@@ -590,7 +705,7 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
     const state = gameState;
     if (!state.canRoll || state.isGameOver) return;
 
-    const claimedPlayerCount = state.players.filter(p => p.isClaimed).length;
+    const claimedPlayerCount = state.players.filter(p => p.isClaimed && !p.isSpectator).length;
     if (claimedPlayerCount < 2 && state.players.every(p => p.scores.length === 0)) {
         publishState({ ...state, gameMessage: "Нужно как минимум 2 игрока, чтобы начать игру." });
         return;
@@ -606,13 +721,17 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
       const newPlayers = state.players.map((player, index) =>
         index === state.currentPlayerIndex ? { ...player, scores: [...player.scores, '/'] } : player
       );
-      const nextPlayerIndex = (state.currentPlayerIndex + 1) % playerCount;
+      const nextPlayerIndex = findNextActivePlayer(state.currentPlayerIndex, newPlayers);
+      const nextPlayer = newPlayers[nextPlayerIndex];
+
       const boltState = {
         ...createInitialState(playerCount),
         players: newPlayers,
+        spectators: state.spectators,
         currentPlayerIndex: nextPlayerIndex,
         diceOnBoard: newDice,
-        gameMessage: `Болт! Очки сгорели. Ход Игрока ${nextPlayerIndex + 1}.`,
+        gameMessage: `${state.players[state.currentPlayerIndex].name} получает болт! Ход ${nextPlayer.name}.`,
+        turnStartTime: Date.now(),
       };
       publishState(boltState);
       return;
@@ -731,10 +850,13 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
         finalTurnScore = state.scoreFromPreviousRolls + validation.score;
     }
     
+    const currentPlayer = state.players[state.currentPlayerIndex];
+    
     if (finalTurnScore === 0) {
       const newPlayersWithBolt = state.players.map((p, i) => i === state.currentPlayerIndex ? { ...p, scores: [...p.scores, '/'] } : p);
-      const nextIdx = (state.currentPlayerIndex + 1) % playerCount;
-      publishState({ ...createInitialState(playerCount), players: newPlayersWithBolt, currentPlayerIndex: nextIdx, gameMessage: `${state.players[state.currentPlayerIndex].name} получает болт. Ход Игрока ${nextIdx + 1}.`});
+      const nextIdx = findNextActivePlayer(state.currentPlayerIndex, newPlayersWithBolt);
+      const nextPlayerName = newPlayersWithBolt[nextIdx].name;
+      publishState({ ...createInitialState(playerCount), players: newPlayersWithBolt, spectators: state.spectators, currentPlayerIndex: nextIdx, gameMessage: `${currentPlayer.name} получает болт. Ход ${nextPlayerName}.`, turnStartTime: Date.now() });
       return;
     }
 
@@ -742,47 +864,79 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
     const totalScore = calculateTotalScore(newPlayers[state.currentPlayerIndex]);
     
     if (totalScore >= 1000) {
-      publishState({ ...createInitialState(playerCount), players: newPlayers, isGameOver: true, gameMessage: `${newPlayers[state.currentPlayerIndex].name} победил, набрав ${totalScore} очков!` });
+      publishState({ ...createInitialState(playerCount), players: newPlayers, spectators: state.spectators, isGameOver: true, gameMessage: `${currentPlayer.name} победил, набрав ${totalScore} очков!` });
       return;
     }
 
-    const nextPlayerIndex = (state.currentPlayerIndex + 1) % playerCount;
-    publishState({ ...createInitialState(playerCount), players: newPlayers, currentPlayerIndex: nextPlayerIndex, gameMessage: `${newPlayers[state.currentPlayerIndex].name} записал ${finalTurnScore} очков. Ход Игрока ${nextPlayerIndex + 1}.`});
+    const nextPlayerIndex = findNextActivePlayer(state.currentPlayerIndex, newPlayers);
+    const nextPlayerName = newPlayers[nextPlayerIndex].name;
+    publishState({ ...createInitialState(playerCount), players: newPlayers, spectators: state.spectators, currentPlayerIndex: nextPlayerIndex, gameMessage: `${currentPlayer.name} записал ${finalTurnScore} очков. Ход ${nextPlayerName}.`, turnStartTime: Date.now() });
   };
+
+  const handleSkipTurn = () => {
+    const state = gameState;
+    if(state.isGameOver || myPlayerId === state.currentPlayerIndex) return;
+    
+    const currentPlayer = state.players[state.currentPlayerIndex];
+    if(currentPlayer.status === 'online') return;
+
+    const newPlayers = state.players.map((p, i) => i === state.currentPlayerIndex ? { ...p, scores: [...p.scores, '/'] } : p);
+    const nextIdx = findNextActivePlayer(state.currentPlayerIndex, newPlayers);
+    const nextPlayerName = newPlayers[nextIdx].name;
+    publishState({ ...createInitialState(playerCount), players: newPlayers, spectators: state.spectators, currentPlayerIndex: nextIdx, gameMessage: `${currentPlayer.name} пропустил ход. Ход ${nextPlayerName}.`, turnStartTime: Date.now() });
+  }
 
   const handleNewGame = () => {
       const newInitialState = createInitialState(playerCount);
-      // Keep claimed players
       const newPlayers = newInitialState.players.map((p, i) => {
           const oldPlayer = gameState.players[i];
-          if (oldPlayer && oldPlayer.isClaimed) {
-              return { ...p, name: oldPlayer.name, isClaimed: true };
+          if (oldPlayer && oldPlayer.isClaimed && !oldPlayer.isSpectator) {
+              return { ...p, name: oldPlayer.name, isClaimed: true, status: 'offline' };
           }
           return p;
       });
-      publishState({ ...newInitialState, players: newPlayers });
+      publishState({ ...newInitialState, players: newPlayers, turnStartTime: Date.now() });
   };
 
 
   const handleJoin = (playerIndex) => {
     const state = gameState;
     if (myPlayerId !== null || state.players[playerIndex].isClaimed) return;
+    
+    setMyPlayerId(playerIndex);
 
     const newPlayers = state.players.map((p, i) => {
       if (i === playerIndex) {
-        return { ...p, name: playerName, isClaimed: true, scores: [] };
+        return { ...p, name: playerName, isClaimed: true, scores: [], status: 'online' };
       }
       return p;
     });
 
-    const claimedPlayerCount = newPlayers.filter(p => p.isClaimed).length;
+    const claimedPlayerCount = newPlayers.filter(p => p.isClaimed && !p.isSpectator).length;
     const gameMessage = claimedPlayerCount > 1
-        ? `Ход Игрока ${state.currentPlayerIndex + 1}. Бросайте кости!`
+        ? `Ход ${state.players[state.currentPlayerIndex].name}. Бросайте кости!`
         : `Ожидание игроков...`;
 
-    setMyPlayerId(playerIndex);
     publishState({ ...state, players: newPlayers, gameMessage });
   };
+  
+  const handleLeaveAndSpectate = () => {
+      if (myPlayerId === null) return;
+      
+      const me = gameState.players[myPlayerId];
+      const newPlayers = gameState.players.map(p => p.id === myPlayerId ? {...p, isSpectator: true, isClaimed: false } : p);
+      const newSpectators = [...gameState.spectators, { name: me.name, score: calculateTotalScore(me) }];
+      
+      let nextPlayerIndex = gameState.currentPlayerIndex;
+      if (myPlayerId === gameState.currentPlayerIndex) {
+          nextPlayerIndex = findNextActivePlayer(gameState.currentPlayerIndex, newPlayers);
+      }
+      
+      publishState({ ...gameState, players: newPlayers, spectators: newSpectators, currentPlayerIndex: nextPlayerIndex });
+      
+      setIsSpectator(true);
+      localStorage.removeItem('tysiacha-session');
+  }
 
   const handleDragStart = (e, index) => {
     if (gameState.selectedDiceIndices.length > 0 && gameState.selectedDiceIndices.includes(index)) {
@@ -813,6 +967,18 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
         handleKeepDice([index]);
     }
   };
+  
+  const PlayerStatus = ({ player }) => {
+    if (!player.isClaimed || player.isSpectator) return null;
+    const statusMap = {
+        online: { text: 'онлайн', color: 'text-green-400' },
+        away: { text: 'отошел', color: 'text-yellow-400' },
+        disconnected: { text: 'отключен', color: 'text-red-500' },
+        offline: { text: 'подключается', color: 'text-gray-400' },
+    };
+    const { text, color } = statusMap[player.status] || statusMap.offline;
+    return React.createElement('span', { className: `text-xs ml-1 ${color}` }, `(${text})`);
+  };
 
   if (connectionStatus !== 'connected' || !gameState) {
     return React.createElement('div', { className: "text-center" }, 
@@ -826,10 +992,14 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
     );
   }
 
-  const isMyTurn = myPlayerId === gameState.currentPlayerIndex;
+  const isMyTurn = myPlayerId === gameState.currentPlayerIndex && !isSpectator;
   const rollButtonText = (gameState.keptDiceThisTurn.length >= 5 ? 5 : 5 - gameState.keptDiceThisTurn.length) === 5 
     ? 'Бросить все' : `Бросить ${5 - gameState.keptDiceThisTurn.length}`;
-  const firstAvailableSlotIndex = gameState.players.findIndex(p => !p.isClaimed);
+  const firstAvailableSlotIndex = gameState.players.findIndex(p => !p.isClaimed && !p.isSpectator);
+  
+  const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+  const isCurrentPlayerInactive = currentPlayer && (currentPlayer.status === 'away' || currentPlayer.status === 'disconnected');
+  const showSkipButton = !isMyTurn && isCurrentPlayerInactive && !gameState.isGameOver && (Date.now() - gameState.turnStartTime > 60000);
 
   return React.createElement(
     React.Fragment,
@@ -840,12 +1010,13 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
       React.createElement('header', { className: "flex justify-between items-center mb-4 flex-shrink-0" },
         React.createElement('div', { className: "p-2 bg-black/50 rounded-lg text-sm" }, React.createElement('p', { className: "font-mono" }, `КОД КОМНАТЫ: ${roomCode}`)),
         React.createElement('h1', { onClick: () => setShowRules(true), className: "font-ruslan text-4xl text-yellow-300 cursor-pointer hover:text-yellow-200 transition-colors", title: "Показать правила" }, 'ТЫСЯЧА'),
-        React.createElement('button', { onClick: onExit, className: "px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg font-bold" }, 'Выйти')
+        React.createElement('button', { onClick: isSpectator ? onExit : handleLeaveAndSpectate, className: "px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg font-bold" }, isSpectator ? 'Вернуться в лобби' : 'Покинуть игру')
       ),
       React.createElement('div', { className: "flex-grow flex flex-col lg:grid lg:grid-cols-4 gap-4 min-h-0" },
         React.createElement('aside', { className: `lg:col-span-1 bg-slate-800/80 p-4 rounded-xl border border-slate-700 flex flex-col transition-all duration-500 ease-in-out ${isScoreboardExpanded ? 'h-full' : 'flex-shrink-0'}` },
-          React.createElement('div', { className: "flex justify-between items-center mb-4 flex-shrink-0" },
+          React.createElement('div', { className: "flex justify-between items-center mb-4 flex-shrink-0 flex-wrap" },
             React.createElement('h2', { className: "font-ruslan text-3xl text-yellow-300" }, 'Игроки'),
+            gameState.spectators.length > 0 && React.createElement('div', { className: "text-sm text-gray-400 ml-auto mr-2" }, `Зрители: ${gameState.spectators.length}`),
             React.createElement('button', { onClick: () => setIsScoreboardExpanded(!isScoreboardExpanded), className: "p-1 rounded-full hover:bg-slate-700/50 lg:hidden" }, 
               React.createElement('svg', { xmlns: "http://www.w3.org/2000/svg", className: `h-6 w-6 text-yellow-300 transition-transform duration-300 ${isScoreboardExpanded ? 'rotate-180' : ''}`, fill: "none", viewBox: "0 0 24 24", stroke: "currentColor", strokeWidth: 2 },
                 React.createElement('path', { strokeLinecap: "round", strokeLinejoin: "round", d: "M19 9l-7 7-7-7" })
@@ -856,10 +1027,14 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
             React.createElement('table', { className: "w-full text-sm text-left text-gray-300" },
               React.createElement('thead', { className: "text-xs text-yellow-300 uppercase bg-slate-800 sticky top-0 z-10" },
                 React.createElement('tr', null, gameState.players.map((player, index) =>
-                  React.createElement('th', { key: player.id, scope: "col", className: `h-10 px-0 py-0 text-center align-middle transition-all duration-300 relative ${index === gameState.currentPlayerIndex && !gameState.isGameOver ? 'bg-yellow-400 text-slate-900' : 'bg-slate-700/50'} ${index === myPlayerId ? 'outline outline-2 outline-blue-400' : ''}` },
-                    index === firstAvailableSlotIndex && myPlayerId === null
-                      ? React.createElement('button', { onClick: () => handleJoin(index), className: "w-full h-full bg-green-600 hover:bg-green-700 font-bold text-white transition-colors" }, "Войти")
-                      : React.createElement('span', { className: "px-2" }, player.name)
+                  React.createElement('th', { key: player.id, scope: "col", className: `h-16 px-0 py-0 text-center align-middle transition-all duration-300 relative ${index === gameState.currentPlayerIndex && !gameState.isGameOver ? 'bg-yellow-400 text-slate-900' : 'bg-slate-700/50'} ${index === myPlayerId ? 'outline outline-2 outline-blue-400' : ''}` },
+                    player.isSpectator
+                      ? React.createElement('span', { className: "px-2 text-gray-500 italic" }, 'Вышел')
+                      : !player.isClaimed
+                        ? (index === firstAvailableSlotIndex && myPlayerId === null && !isSpectator)
+                          ? React.createElement('button', { onClick: () => handleJoin(index), className: "w-full h-full bg-green-600 hover:bg-green-700 font-bold text-white transition-colors" }, "Войти")
+                          : React.createElement('span', { className: "px-2 text-gray-400" }, `Место ${index + 1}`)
+                        : React.createElement('div', null, React.createElement('span', { className: "px-2" }, player.name), React.createElement(PlayerStatus, { player: player }))
                   )
                 ))
               ),
@@ -909,6 +1084,7 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
             )
           ),
           React.createElement('div', { className: "w-full" },
+             showSkipButton && React.createElement('div', {className: 'text-center mb-2'}, React.createElement('button', {onClick: handleSkipTurn, className: 'px-4 py-2 bg-orange-600 hover:bg-orange-700 rounded-lg font-bold animate-pulse'}, `Пропустить ход ${currentPlayer.name}`)),
             React.createElement('div', { className: "text-center mb-4" },
               React.createElement('p', { className: "text-xl" }, 'Очки за ход: ', React.createElement('span', { className: "font-ruslan text-5xl text-green-400" }, gameState.currentTurnScore + gameState.potentialScore))
             ),
@@ -931,26 +1107,37 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
 // --- Компонент App ---
 const App = () => {
   const [screen, setScreen] = useState('LOBBY');
-  const [roomCode, setRoomCode] = useState('');
-  const [playerCount, setPlayerCount] = useState(2);
-  const [playerName, setPlayerName] = useState('');
+  const [gameProps, setGameProps] = useState({});
 
-  const handleStartGame = useCallback((code, players, name) => {
-    setRoomCode(code);
-    setPlayerCount(players);
-    setPlayerName(name);
+  useEffect(() => {
+    try {
+        const savedSession = localStorage.getItem('tysiacha-session');
+        if (savedSession) {
+            const { roomCode, playerCount, playerName } = JSON.parse(savedSession);
+            // We don't pass myPlayerId here, Game component will restore it itself
+            handleStartGame(roomCode, playerCount, playerName);
+        }
+    } catch(e) {
+        console.error("Failed to load session:", e);
+        localStorage.removeItem('tysiacha-session');
+    }
+  }, []);
+
+  const handleStartGame = useCallback((roomCode, playerCount, playerName) => {
+    setGameProps({ roomCode, playerCount, playerName });
     setScreen('GAME');
   }, []);
 
   const handleExitGame = useCallback(() => {
-    setRoomCode('');
+    localStorage.removeItem('tysiacha-session');
+    setGameProps({});
     setScreen('LOBBY');
   }, []);
 
   const renderScreen = () => {
     switch (screen) {
       case 'GAME':
-        return React.createElement(Game, { roomCode: roomCode, playerCount: playerCount, playerName: playerName, onExit: handleExitGame });
+        return React.createElement(Game, { key: gameProps.roomCode, ...gameProps, onExit: handleExitGame });
       case 'LOBBY':
       default:
         return React.createElement(Lobby, { onStartGame: handleStartGame });
