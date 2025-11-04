@@ -144,7 +144,7 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
                             setIsSpectator(true);
                             localStorage.removeItem('tysiacha-session');
                         }
-                        if(myPlayerId !== null && !receivedState.players[myPlayerId]?.isClaimed){
+                        if(myPlayerId !== null && !receivedState.players[myPlayerId]?.isClaimed && !receivedState.players[myPlayerId]?.isSpectator){
                             onExit();
                         }
                         return receivedState;
@@ -189,11 +189,10 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
             const lastSeen = lastSeenTimestampsRef.current[playerCopy.id] || 0;
             
             // Timeout check (10 minutes)
-            if (now - lastSeen > 600000) {
-                // If player is still marked as claimed, reset them.
-                const initialPlayerState = createInitialState(playerCount).players[playerCopy.id];
+            if (now - lastSeen > 600000 && playerCopy.isClaimed) {
+                // If player is still marked as claimed, mark them as having left.
                 needsUpdate = true;
-                return { ...initialPlayerState, id: playerCopy.id };
+                return { ...playerCopy, isClaimed: false, isSpectator: true, status: 'offline' };
             }
 
             // Status update check
@@ -484,10 +483,10 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
       
       const state = gameStateRef.current; // Use ref to get latest state
       const me = state.players[myPlayerId];
-      const initialPlayerState = createInitialState(playerCount).players[myPlayerId];
+      // Instead of resetting the player, mark them as having left.
       const newPlayers = state.players.map(p => 
         p.id === myPlayerId 
-        ? { ...initialPlayerState, id: myPlayerId } // Reset player slot
+        ? { ...p, isClaimed: false, isSpectator: true, status: 'offline' }
         : p
       );
       
@@ -505,7 +504,7 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
       // If only one player remains, they win.
       if (remainingPlayers.length === 1 && activePlayersBeforeLeave > 1) {
           finalState = {
-              ...state, // Safe to spread here because we are ending the game
+              ...state,
               players: newPlayers,
               spectators: state.spectators,
               isGameOver: true,
@@ -645,12 +644,15 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
                 React.createElement('tr', null, gameState.players.map((player, index) =>
                   React.createElement('th', { key: player.id, scope: "col", className: `h-16 px-0 py-0 text-center align-middle transition-all duration-300 relative ${index === gameState.currentPlayerIndex && !gameState.isGameOver ? 'bg-yellow-400 text-slate-900' : 'bg-slate-700/50'} ${index === myPlayerId ? 'outline outline-2 outline-blue-400' : ''}` },
                     player.isSpectator
-                      ? React.createElement('span', { className: "px-2 text-gray-500 italic" }, 'Вышел')
+                      ? React.createElement('div', { className: "flex flex-col items-center justify-center h-full py-2 text-gray-500" },
+                          React.createElement('span', { className: "px-2 line-through" }, player.name),
+                          React.createElement('span', { className: "text-xs italic" }, '(вышел)')
+                        )
                       : !player.isClaimed
                         ? (index === firstAvailableSlotIndex && myPlayerId === null && !isSpectator)
                           ? React.createElement('button', { onClick: () => handleJoin(index), className: "w-full h-full bg-green-600 hover:bg-green-700 font-bold text-white transition-colors" }, "Войти")
                           : React.createElement('span', { className: "px-2 text-gray-400" }, `Место ${index + 1}`)
-                        : React.createElement('div', { className: "flex flex-col items-center justify-center h-full py-2" }, // Added flex container for name and status
+                        : React.createElement('div', { className: "flex flex-col items-center justify-center h-full py-2" },
                             React.createElement('span', { className: "px-2" }, player.name),
                             React.createElement(PlayerStatus, { player: player })
                           )
