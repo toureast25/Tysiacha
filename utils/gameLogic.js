@@ -118,6 +118,7 @@ export const createInitialState = (pCount) => {
     })),
     spectators: [],
     currentPlayerIndex: 0,
+    hostId: 0, // Player 0 is the initial host
     diceOnBoard: [],
     keptDiceThisTurn: [],
     diceKeptFromThisRoll: [],
