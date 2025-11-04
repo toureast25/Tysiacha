@@ -9,6 +9,7 @@ const Lobby = ({ onStartGame }) => {
   // Initialize state based on localStorage to avoid race conditions on mount
   const [isJoining, setIsJoining] = React.useState(() => !!localStorage.getItem('tysiacha-lastRoom'));
   const [roomStatus, setRoomStatus] = React.useState(null); // { status: 'loading' | 'active' | 'waiting' | 'not_found', host: 'name', message: '...' }
+  const mqttClientRef = React.useRef(null);
 
   React.useEffect(() => {
     // Pre-fill player name from a previous session if it exists
@@ -30,17 +31,31 @@ const Lobby = ({ onStartGame }) => {
     }
   }, [isJoining]);
 
-  // Fetch room status when roomCode changes in joining mode
+  // Fetch and listen for room status when roomCode changes in joining mode
   React.useEffect(() => {
+    const cleanup = () => {
+      if (mqttClientRef.current) {
+        mqttClientRef.current.end(true);
+        mqttClientRef.current = null;
+      }
+    };
+
     const code = roomCode.trim();
     if (isJoining && code.length >= 4) {
+      cleanup(); // Clean up any existing connection first
+
       setRoomStatus({ status: 'loading' });
       const client = mqtt.connect(MQTT_BROKER_URL);
+      mqttClientRef.current = client;
       const topic = `${MQTT_TOPIC_PREFIX}/${code}`;
-      
+
       const timeoutId = setTimeout(() => {
-        setRoomStatus({ status: 'not_found' });
-        client.end();
+        setRoomStatus(prevStatus => {
+          if (prevStatus && prevStatus.status === 'loading') {
+            return { status: 'not_found' };
+          }
+          return prevStatus;
+        });
       }, 3000);
 
       client.on('connect', () => {
@@ -48,7 +63,7 @@ const Lobby = ({ onStartGame }) => {
       });
 
       client.on('message', (receivedTopic, message) => {
-        clearTimeout(timeoutId);
+        clearTimeout(timeoutId); // We got a message, room exists.
         try {
           const gameState = JSON.parse(message.toString());
           const host = gameState.players.find(p => p.isClaimed && p.id === 0) || gameState.players.find(p => p.isClaimed);
@@ -61,23 +76,29 @@ const Lobby = ({ onStartGame }) => {
             message: isGameRunning ? 'Идёт игра' : `Набор игроков (${claimedPlayers}/${gameState.players.length})`
           });
         } catch (e) {
-          setRoomStatus({ status: 'not_found' });
+          setRoomStatus({ status: 'not_found', message: 'Ошибка данных комнаты' });
         }
-        client.end(true); // Force close
+        // Do not end the client here; keep listening for updates.
       });
 
       client.on('error', () => {
         clearTimeout(timeoutId);
-        setRoomStatus({ status: 'not_found' });
-        client.end(true); // Force close
+        setRoomStatus({ status: 'not_found', message: 'Ошибка подключения' });
+        cleanup();
+      });
+      
+      client.on('close', () => {
+         setRoomStatus(prevStatus => {
+            if(prevStatus && prevStatus.status !== 'loading' && prevStatus.status !== 'not_found') {
+                return { status: 'not_found', message: 'Соединение с комнатой потеряно.' };
+            }
+            return prevStatus;
+         });
       });
 
-      return () => {
-        clearTimeout(timeoutId);
-        if (client) client.end(true);
-      };
-
+      return cleanup; // Return the cleanup function to be called on unmount or dependency change
     } else {
+      cleanup();
       setRoomStatus(null);
     }
   }, [roomCode, isJoining]);
@@ -108,7 +129,7 @@ const Lobby = ({ onStartGame }) => {
             );
             break;
         case 'not_found':
-            content = 'Комната не найдена или пуста.';
+            content = roomStatus.message || 'Комната не найдена или пуста.';
             break;
         case 'active':
         case 'waiting':
