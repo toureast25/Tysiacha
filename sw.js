@@ -13,8 +13,6 @@ const urlsToCache = [
   '/components/App.js',
   '/components/Dice.js',
   '/components/Game.js',
-  '/components/GameUI.js',
-  '/hooks/useGameEngine.js',
   '/components/Lobby.js',
   '/components/RulesModal.js',
   '/components/SpectatorsModal.js',
@@ -31,13 +29,7 @@ self.addEventListener('install', event => {
     caches.open(CACHE_NAME)
       .then(cache => {
         console.log('Opened cache');
-        // Игнорируем ошибки при кэшировании сторонних ресурсов
-        const cachePromises = urlsToCache.map(urlToCache => {
-            return cache.add(urlToCache).catch(err => {
-                console.warn(`Failed to cache ${urlToCache}:`, err);
-            });
-        });
-        return Promise.all(cachePromises);
+        return cache.addAll(urlsToCache);
       })
   );
 });
