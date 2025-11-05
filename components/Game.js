@@ -512,66 +512,93 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
 
   const handleJoinGame = () => {
     const state = gameStateRef.current;
-    if (myPlayerId !== null || isSpectator) return;
-
-    const firstAvailableIndex = state.players.findIndex(p => !p.isClaimed && !p.isSpectator);
-
-    if (firstAvailableIndex === -1) {
-        if (window.confirm("Комната заполнена. Хотите присоединиться в качестве зрителя?")) {
-            const newSpectator = { name: playerName, id: `spec-${Date.now()}` };
-            const newState = {
-                ...state,
-                spectators: [...state.spectators, newSpectator]
-            };
-            publishState(newState);
-            setIsSpectator(true);
+    if (myPlayerId !== null) return;
+  
+    // --- Step 1: Check for Rejoin ---
+    const returningPlayerIndex = state.players.findIndex(p => p.name === playerName && !p.isClaimed);
+  
+    if (returningPlayerIndex > -1) {
+      setMyPlayerId(returningPlayerIndex);
+      const newPlayers = state.players.map((p, i) => {
+        if (i === returningPlayerIndex) {
+          return { ...p, isClaimed: true, status: 'online', isSpectator: false };
         }
-        return;
+        return p;
+      });
+      const newState = {
+        ...state,
+        players: newPlayers,
+        gameMessage: `${playerName} вернулся в игру.`
+      };
+      publishState(newState, true);
+      setIsSpectator(false); // Make sure to reset spectator status on client
+      return;
     }
-
+  
+    // --- Step 2: Find a New Slot (overwrite if needed) ---
+    const firstAvailableIndex = state.players.findIndex(p => !p.isClaimed && !p.isSpectator);
+  
+    if (firstAvailableIndex === -1) {
+      if (window.confirm("Комната заполнена. Хотите присоединиться в качестве зрителя?")) {
+        const newSpectator = { name: playerName, id: `spec-${Date.now()}` };
+        const newState = { ...state, spectators: [...state.spectators, newSpectator] };
+        publishState(newState);
+        setIsSpectator(true);
+      }
+      return;
+    }
+  
     setMyPlayerId(firstAvailableIndex);
-
+  
+    // A new player RESETS the scores of the slot they take.
     const newPlayers = state.players.map((p, i) => {
       if (i === firstAvailableIndex) {
-        return { ...p, name: playerName, isClaimed: true, scores: [], status: 'online' };
+        return { ...p, name: playerName, isClaimed: true, scores: [], status: 'online', isSpectator: false };
       }
       return p;
     });
-    
+  
     let newHostId = state.hostId;
-    if (state.hostId === null) {
-      newHostId = firstAvailableIndex;
+    if (state.hostId === null || !newPlayers.some(p => p.id === state.hostId && p.isClaimed)) {
+      newHostId = findNextHost(newPlayers) ?? firstAvailableIndex;
     }
-
+  
     const claimedPlayerCount = newPlayers.filter(p => p.isClaimed && !p.isSpectator).length;
-    const isFreshGame = state.players.every(p => p.scores.length === 0);
-
+    const isFreshGame = newPlayers.every(p => p.scores.length === 0);
+  
     let gameMessage = state.gameMessage;
     let canRoll = state.canRoll;
-
-    if (claimedPlayerCount >= 2 && isFreshGame && !state.canRoll) {
-        gameMessage = `Игра началась! Ход ${newPlayers[state.currentPlayerIndex].name}.`;
-        canRoll = true;
+  
+    if (claimedPlayerCount >= 2 && (isFreshGame || state.isGameOver) && !state.canRoll) {
+      gameMessage = `Игра началась! Ход ${newPlayers[newHostId].name}.`;
+      canRoll = true;
     } else if (claimedPlayerCount < 2) {
-        gameMessage = `Ожидание игроков...`;
+      gameMessage = `Ожидание игроков...`;
     } else {
-        gameMessage = `${playerName} присоединился. Ход ${newPlayers[state.currentPlayerIndex].name}.`;
+      gameMessage = `${playerName} присоединился. Ход ${newPlayers[state.currentPlayerIndex].name}.`;
     }
-
+  
     publishState({ ...state, players: newPlayers, gameMessage, hostId: newHostId, canRoll }, true);
   };
 
   const handleLeaveGame = () => {
-      if (myPlayerId === null || isSpectator) {
+      if (myPlayerId === null) {
+        onExit();
+        return;
+      }
+      if (isSpectator) {
+        // Handle spectator leaving - just exit, no state change needed from their side
         onExit();
         return;
       }
       
       const state = gameStateRef.current;
       const me = state.players[myPlayerId];
+      
+      // Mark the player as "left" by making them unclaimed, but keep their data.
       const newPlayers = state.players.map(p => 
         p.id === myPlayerId 
-        ? { ...p, isClaimed: false, isSpectator: true, status: 'offline' }
+        ? { ...p, isClaimed: false, status: 'offline' }
         : p
       );
       
@@ -581,7 +608,9 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
       }
       
       let nextPlayerIndex = state.currentPlayerIndex;
-      if (myPlayerId === state.currentPlayerIndex) {
+      const gameWasInProgress = !state.isGameOver;
+
+      if (myPlayerId === state.currentPlayerIndex && gameWasInProgress) {
           nextPlayerIndex = findNextActivePlayer(state.currentPlayerIndex, newPlayers);
       }
       
@@ -590,30 +619,50 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
       
       let finalState;
 
-      if (remainingPlayers.length === 1 && activePlayersBeforeLeave > 1) {
+      if (gameWasInProgress && remainingPlayers.length < 2 && activePlayersBeforeLeave >= 2) {
           finalState = {
               ...state,
               players: newPlayers,
               hostId: newHostId,
-              spectators: state.spectators,
               isGameOver: true,
-              gameMessage: `${remainingPlayers[0].name} победил, так как все остальные игроки вышли!`,
+              gameMessage: remainingPlayers.length === 1 
+                ? `${remainingPlayers[0].name} победил, так как все остальные игроки вышли!`
+                : 'Все игроки вышли. Игра окончена.',
           };
-      } else if (remainingPlayers.length === 0) {
-          finalState = createInitialState(state.players.length);
-          finalState.gameMessage = 'Все игроки вышли. Игра окончена.';
       } else {
-          const cleanState = createInitialState(state.players.length);
-          const nextPlayerName = newPlayers[nextPlayerIndex].name;
+          const nextPlayer = newPlayers[nextPlayerIndex];
+          const nextPlayerName = nextPlayer ? nextPlayer.name : '';
+          
+          let message = `${me.name} покинул(а) игру.`;
+          if(gameWasInProgress && nextPlayerName && myPlayerId === state.currentPlayerIndex) {
+              message += ` Ход ${nextPlayerName}.`;
+          }
+
           finalState = {
-              ...cleanState,
-              players: newPlayers,
-              hostId: newHostId,
-              spectators: state.spectators,
-              currentPlayerIndex: nextPlayerIndex,
-              gameMessage: `${me.name} покинул(а) игру. Ход ${nextPlayerName}.`,
-              turnStartTime: Date.now(),
+            ...state,
+            players: newPlayers,
+            hostId: newHostId,
+            currentPlayerIndex: nextPlayerIndex,
+            gameMessage: message,
           };
+          
+          if (myPlayerId === state.currentPlayerIndex && gameWasInProgress) {
+              const cleanTurnState = createInitialState(1);
+              finalState = {
+                  ...finalState,
+                  diceOnBoard: cleanTurnState.diceOnBoard,
+                  keptDiceThisTurn: cleanTurnState.keptDiceThisTurn,
+                  diceKeptFromThisRoll: cleanTurnState.diceKeptFromThisRoll,
+                  selectedDiceIndices: cleanTurnState.selectedDiceIndices,
+                  scoreFromPreviousRolls: cleanTurnState.scoreFromPreviousRolls,
+                  currentTurnScore: cleanTurnState.currentTurnScore,
+                  potentialScore: cleanTurnState.potentialScore,
+                  canRoll: true,
+                  canBank: false,
+                  canKeep: false,
+                  turnStartTime: Date.now(),
+              };
+          }
       }
       
       publishState(finalState);
@@ -737,15 +786,16 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
               React.createElement('thead', { className: "text-xs text-yellow-300 uppercase bg-slate-800 sticky top-0 z-10" },
                 React.createElement('tr', null, (() => {
                   const canJoin = myPlayerId === null && !isSpectator;
-                  const claimedPlayerCount = gameState.players.filter(p => p.isClaimed && !p.isSpectator).length;
-                  const availableSlots = gameState.players.length - claimedPlayerCount;
                   let joinButtonRendered = false;
+                  const availableSlotsForJoin = gameState.players.filter(p => !p.isClaimed && !p.isSpectator).length;
 
                   return gameState.players.map(player => {
-                    if (player.isClaimed || player.isSpectator) {
+                    const hasHistory = player.isClaimed || player.isSpectator || player.name !== `Игрок ${player.id + 1}`;
+
+                    if (hasHistory) {
                       const index = player.id;
-                      return React.createElement('th', { key: `player-header-${player.id}`, scope: "col", className: `h-16 px-0 py-0 text-center align-middle transition-all duration-300 relative ${index === gameState.currentPlayerIndex && !gameState.isGameOver ? 'bg-yellow-400 text-slate-900' : 'bg-slate-700/50'} ${index === myPlayerId ? 'outline outline-2 outline-blue-400' : ''}` },
-                        player.isSpectator && !player.isClaimed
+                      return React.createElement('th', { key: `player-header-${player.id}`, scope: "col", className: `h-16 px-0 py-0 text-center align-middle transition-all duration-300 relative ${index === gameState.currentPlayerIndex && !gameState.isGameOver && player.isClaimed ? 'bg-yellow-400 text-slate-900' : 'bg-slate-700/50'} ${index === myPlayerId ? 'outline outline-2 outline-blue-400' : ''}` },
+                        !player.isClaimed
                           ? React.createElement('div', { className: "flex flex-col items-center justify-center h-full py-2 text-gray-500" },
                               React.createElement('span', { className: "px-2 line-through" }, player.name),
                               React.createElement('span', { className: "text-xs italic" }, '(вышел)')
@@ -757,16 +807,16 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
                       );
                     }
 
-                    if (canJoin && !joinButtonRendered && availableSlots > 0) {
+                    if (canJoin && !joinButtonRendered && availableSlotsForJoin > 0) {
                       joinButtonRendered = true;
                       return React.createElement('th', {
                         key: 'join-cell',
-                        colSpan: availableSlots,
+                        colSpan: availableSlotsForJoin,
                         className: 'p-0 align-middle'
                       }, React.createElement('button', {
                         onClick: handleJoinGame,
                         className: 'w-full h-16 bg-green-600 hover:bg-green-700 text-white font-bold transition-all text-center uppercase tracking-wider text-lg'
-                      }, `Войти в игру (${availableSlots} мест)`));
+                      }, `Войти в игру (${availableSlotsForJoin} мест)`));
                     }
                     
                     return null;
@@ -775,7 +825,7 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
               ),
               React.createElement('tbody', { className: `lg:table-row-group ${isScoreboardExpanded ? '' : 'hidden'}` },
                 (() => {
-                  const hasAnyPlayerJoined = gameState.players.some(p => p.isClaimed || p.isSpectator);
+                  const hasAnyPlayerJoined = gameState.players.some(p => p.isClaimed || p.isSpectator || p.name !== `Игрок ${p.id + 1}`);
                   const maxRounds = gameState.players.reduce((max, p) => Math.max(max, (p.scores ? p.scores.length : 0)), 0);
 
                   if (!hasAnyPlayerJoined) {
@@ -790,7 +840,7 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
                     rows.push(React.createElement('tr', { key: `round-row-${i}`, className: "border-b border-slate-700 hover:bg-slate-700/30" },
                       gameState.players.map(player =>
                         React.createElement('td', { key: `cell-${player.id}-${i}`, className: "py-2 px-2 text-center font-mono" },
-                           (player.isClaimed || player.isSpectator) && player.scores[i] !== undefined ? player.scores[i] : React.createElement('span', { className: "text-slate-500" }, '-')
+                           (player.isClaimed || player.isSpectator || player.scores.length > i) && player.scores[i] !== undefined ? player.scores[i] : React.createElement('span', { className: "text-slate-500" }, '-')
                         )
                       )
                     ));
@@ -801,8 +851,9 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
               React.createElement('tfoot', { className: "sticky bottom-0 bg-slate-800 font-bold text-white border-t-2 border-slate-500" },
                  React.createElement('tr', null, gameState.players.map((player) => {
                    const index = player.id;
-                   return React.createElement('td', { key: `total-score-${player.id}`, className: `h-10 px-2 text-center text-lg font-mono align-middle transition-colors duration-300 ${index === gameState.currentPlayerIndex && !gameState.isGameOver ? 'bg-yellow-400/80 text-slate-900' : 'bg-slate-900/50'} ${index === myPlayerId ? 'outline outline-2 outline-blue-400' : ''}` }, 
-                     (player.isClaimed || player.isSpectator) ? calculateTotalScore(player) : ''
+                   const hasHistory = player.isClaimed || player.isSpectator || player.name !== `Игрок ${player.id + 1}`;
+                   return React.createElement('td', { key: `total-score-${player.id}`, className: `h-10 px-2 text-center text-lg font-mono align-middle transition-colors duration-300 ${index === gameState.currentPlayerIndex && !gameState.isGameOver && player.isClaimed ? 'bg-yellow-400/80 text-slate-900' : 'bg-slate-900/50'} ${index === myPlayerId ? 'outline outline-2 outline-blue-400' : ''}` }, 
+                     hasHistory ? calculateTotalScore(player) : ''
                    );
                  }))
               )
