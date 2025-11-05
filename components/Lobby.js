@@ -103,8 +103,12 @@ const Lobby = ({ onStartGame }) => {
   }, [roomCode, isJoining]);
 
   const generateRoomCode = () => {
-    const code = Math.random().toString(36).substring(2, 8).toUpperCase();
-    setRoomCode(code);
+    const chars = 'АБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ0123456789';
+    let result = '';
+    for (let i = 0; i < 6; i++) {
+      result += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    setRoomCode(result);
   };
 
   const handleStart = () => {
@@ -173,20 +177,16 @@ const Lobby = ({ onStartGame }) => {
           { htmlFor: "roomCode", className: "block text-lg font-semibold text-gray-300 mb-2" },
           isJoining ? 'Введите код комнаты' : 'Код вашей комнаты'
         ),
-        React.createElement('input', {
-          id: "roomCode",
-          type: "text",
-          value: roomCode,
-          onChange: (e) => setRoomCode(e.target.value.toUpperCase()),
-          readOnly: !isJoining,
-          className: "w-full p-3 text-center bg-slate-900 border-2 border-slate-600 rounded-lg text-2xl font-mono tracking-widest text-white focus:outline-none focus:border-yellow-400 transition-colors"
-        }),
+        React.createElement('div', { className: "relative" },
+          React.createElement('input', {
+            id: "roomCode",
+            type: "text",
+            value: roomCode,
+            onChange: (e) => setRoomCode(e.target.value.toUpperCase()),
+            className: "w-full p-3 text-center bg-slate-900 border-2 border-slate-600 rounded-lg text-2xl font-mono tracking-widest text-white focus:outline-none focus:border-yellow-400 transition-colors"
+          })
+        ),
         isJoining ? React.createElement(RoomStatusInfo) : React.createElement('p', { className: "text-sm text-gray-400 mt-2" }, 'Поделитесь этим кодом с друзьями')
-      ),
-      !isJoining && React.createElement(
-        'div',
-        { className: "p-3 bg-slate-900/50 border border-slate-600 rounded-lg" },
-         React.createElement('p', { className: "text-gray-300" }, 'Игра всегда создается на 5 мест.')
       ),
       React.createElement(
         'button',
