@@ -129,6 +129,12 @@ const RulesModal = ({ onClose }) => {
           React.createElement(
             'dl',
             null,
+            React.createElement('dt', { className: "font-semibold text-lg text-white" }, 'Вход в игру (Старт)'),
+            React.createElement(
+              'dd',
+              { className: "ml-4 mb-2" },
+              'Чтобы записать свои первые очки и "войти в игру", вы должны набрать за один ход 50 или более очков. Если вы решите записать счёт, набрав менее 50 очков, ваш ход завершится, а набранные очки сгорят.'
+            ),
             React.createElement('dt', { className: "font-semibold text-lg text-white" }, 'Болт'),
             React.createElement(
               'dd',
@@ -176,7 +182,7 @@ const RulesModal = ({ onClose }) => {
             React.createElement(
               'dd',
               { className: "ml-4 mb-2" },
-              'Если вы находитесь "на бочке" (200-300 или 700-800 очков) и получаете три "болта" подряд, вы получаете штраф. Ваш счёт откатывается до 150 или 650 очков соответственно.'
+              'Если вы находитесь "на бочке" (200-300 или 700-800 очков), вы должны за один ход набрать столько очков, чтобы покинуть её (т.е. набрать 300+ или 800+). Если три хода подряд вам это не удаётся (из-за "болта" или недостаточного количества очков), вы получаете штраф. Ваш общий счёт откатывается до 150 или 650 очков соответственно.'
             ),
             React.createElement('dt', { className: "font-semibold text-lg text-white" }, 'Столкновение на бочке'),
             React.createElement(

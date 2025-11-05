@@ -17,7 +17,34 @@ const App = () => {
   const [screen, setScreen] = React.useState('LOBBY');
   const [gameProps, setGameProps] = React.useState({});
   const [tabStatus, setTabStatus] = React.useState('CHECKING'); // CHECKING, PRIMARY, BLOCKED
+  const [initialRoomCode, setInitialRoomCode] = React.useState(null);
   const channelRef = React.useRef(null);
+
+  React.useEffect(() => {
+    // Этот эффект запускается один раз при монтировании компонента для чтения URL
+    const urlParams = new URLSearchParams(window.location.search);
+    let roomCodeFromUrl = urlParams.get('room'); // Handles ?room=КОД
+
+    // Handles ?room/КОД as requested by user
+    if (!roomCodeFromUrl) {
+        const search = window.location.search;
+        const prefix = '?room/';
+        if (search.startsWith(prefix)) {
+            // Take the part after the prefix.
+            // Also, handle potential other params by splitting at '&' and taking the first part.
+            roomCodeFromUrl = search.substring(prefix.length).split('&')[0];
+        }
+    }
+
+    if (roomCodeFromUrl) {
+      try {
+        const decodedRoomCode = decodeURIComponent(roomCodeFromUrl);
+        setInitialRoomCode(decodedRoomCode.toUpperCase());
+      } catch (e) {
+        console.error("Error decoding room code from URL", e);
+      }
+    }
+  }, []);
 
   React.useEffect(() => {
     // Инициализация канала связи между вкладками
@@ -62,6 +89,12 @@ const App = () => {
 
   React.useEffect(() => {
     if (tabStatus !== 'PRIMARY') return;
+
+    // Если мы заходим по прямой ссылке, не нужно восстанавливать старую сессию.
+    // Пользователь будет перенаправлен в лобби с предзаполненным кодом.
+    if (initialRoomCode) {
+        return;
+    }
     
     try {
         const savedSession = localStorage.getItem('tysiacha-session');
@@ -73,7 +106,7 @@ const App = () => {
         console.error("Failed to load session:", e);
         localStorage.removeItem('tysiacha-session');
     }
-  }, [tabStatus]); // Этот эффект зависит от того, стала ли вкладка главной
+  }, [tabStatus, initialRoomCode]); // Этот эффект зависит от того, стала ли вкладка главной
 
   const handleStartGame = React.useCallback((roomCode, playerName) => {
     setGameProps({ roomCode, playerName });
@@ -98,7 +131,7 @@ const App = () => {
             return React.createElement(Game, { key: gameProps.roomCode, ...gameProps, onExit: handleExitGame });
           case 'LOBBY':
           default:
-            return React.createElement(Lobby, { onStartGame: handleStartGame });
+            return React.createElement(Lobby, { onStartGame: handleStartGame, initialRoomCode: initialRoomCode });
         }
       default:
         return null;
