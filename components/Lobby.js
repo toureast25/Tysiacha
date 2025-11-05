@@ -5,102 +5,117 @@ import { MQTT_BROKER_URL, MQTT_TOPIC_PREFIX } from '../constants.js';
 const Lobby = ({ onStartGame }) => {
   const [roomCode, setRoomCode] = React.useState('');
   const [playerName, setPlayerName] = React.useState('');
-  // Initialize state based on localStorage to avoid race conditions on mount
-  const [isJoining, setIsJoining] = React.useState(() => !!localStorage.getItem('tysiacha-lastRoom'));
-  const [roomStatus, setRoomStatus] = React.useState(null); // { status: 'loading' | 'active' | 'waiting' | 'not_found', host: 'name', message: '...' }
+  const [roomStatus, setRoomStatus] = React.useState(null); // { status: 'loading' | 'found' | 'not_found', message?: string, data?: { hostName: string, playerCount: number } }
+  const [isClientConnected, setIsClientConnected] = React.useState(false);
+  
   const mqttClientRef = React.useRef(null);
+  const statusCheckTimeoutRef = React.useRef(null);
+  const currentTopicRef = React.useRef(null);
+  const debounceTimeoutRef = React.useRef(null);
 
+  // Effect to load saved data and generate initial room code if needed
   React.useEffect(() => {
-    // Pre-fill player name from a previous session if it exists
     const savedName = localStorage.getItem('tysiacha-playerName');
     if (savedName) {
-        setPlayerName(savedName);
+      setPlayerName(savedName);
     }
     const lastRoom = localStorage.getItem('tysiacha-lastRoom');
-    if(lastRoom) {
+    if (lastRoom) {
       setRoomCode(lastRoom);
-      // setIsJoining is already handled by the useState initializer
+    } else {
+      generateRoomCode();
     }
   }, []);
 
+  // Effect to manage the single MQTT client lifecycle
   React.useEffect(() => {
-    if (!isJoining) {
-      generateRoomCode();
-      setRoomStatus(null);
-    }
-  }, [isJoining]);
+    const client = mqtt.connect(MQTT_BROKER_URL);
+    mqttClientRef.current = client;
 
-  // Fetch and listen for room status when roomCode changes in joining mode
-  React.useEffect(() => {
-    const cleanup = () => {
-      if (mqttClientRef.current) {
-        mqttClientRef.current.end(true);
-        mqttClientRef.current = null;
-      }
-    };
+    client.on('connect', () => {
+      setIsClientConnected(true);
+    });
 
-    const code = roomCode.trim();
-    if (isJoining && code.length >= 4) {
-      cleanup(); // Clean up any existing connection first
+    client.on('close', () => {
+      setIsClientConnected(false);
+    });
+    client.on('error', () => {
+      setIsClientConnected(false);
+    });
 
-      setRoomStatus({ status: 'loading' });
-      const client = mqtt.connect(MQTT_BROKER_URL);
-      mqttClientRef.current = client;
-      const topic = `${MQTT_TOPIC_PREFIX}/${code}`;
-
-      const timeoutId = setTimeout(() => {
-        setRoomStatus(prevStatus => {
-          if (prevStatus && prevStatus.status === 'loading') {
-            return { status: 'not_found' };
-          }
-          return prevStatus;
-        });
-      }, 3000);
-
-      client.on('connect', () => {
-        client.subscribe(topic);
-      });
-
-      client.on('message', (receivedTopic, message) => {
-        clearTimeout(timeoutId); // We got a message, room exists.
+    const onMessage = (topic, message) => {
+      // Check if the message is for the topic we are currently interested in
+      if (topic === currentTopicRef.current) {
+        clearTimeout(statusCheckTimeoutRef.current);
         try {
-          const gameState = JSON.parse(message.toString());
-          const host = gameState.players.find(p => p.isClaimed && p.id === 0) || gameState.players.find(p => p.isClaimed);
-          const claimedPlayers = gameState.players.filter(p => p.isClaimed && !p.isSpectator).length;
-          const isGameRunning = claimedPlayers > 1 && gameState.players.some(p => p.scores.length > 0) && !gameState.isGameOver;
-
+          const state = JSON.parse(message.toString());
+          const host = state.players.find(p => p.id === state.hostId);
+          const playerCount = state.players.filter(p => p.isClaimed && !p.isSpectator).length;
           setRoomStatus({
-            status: isGameRunning ? 'active' : 'waiting',
-            host: host ? host.name : 'Неизвестно',
-            message: isGameRunning ? 'Идёт игра' : `Набор игроков (${claimedPlayers}/${gameState.players.length})`
+            status: 'found',
+            data: {
+              hostName: host ? host.name : 'Неизвестен',
+              playerCount: playerCount,
+            }
           });
         } catch (e) {
-          setRoomStatus({ status: 'not_found', message: 'Ошибка данных комнаты' });
+          setRoomStatus({ status: 'found' }); // Found, but couldn't parse details
         }
-        // Do not end the client here; keep listening for updates.
-      });
+      }
+    };
+    
+    client.on('message', onMessage);
 
-      client.on('error', () => {
-        clearTimeout(timeoutId);
-        setRoomStatus({ status: 'not_found', message: 'Ошибка подключения' });
-        cleanup();
-      });
-      
-      client.on('close', () => {
-         setRoomStatus(prevStatus => {
-            if(prevStatus && prevStatus.status !== 'loading' && prevStatus.status !== 'not_found') {
-                return { status: 'not_found', message: 'Соединение с комнатой потеряно.' };
-            }
-            return prevStatus;
-         });
-      });
+    return () => {
+      if (client) {
+        client.end(true);
+      }
+    };
+  }, []);
 
-      return cleanup; // Return the cleanup function to be called on unmount or dependency change
-    } else {
-      cleanup();
+  // Debounced effect to check room status, now depends on client connection
+  React.useEffect(() => {
+    clearTimeout(debounceTimeoutRef.current);
+    clearTimeout(statusCheckTimeoutRef.current);
+
+    const code = roomCode.trim().toUpperCase();
+    const client = mqttClientRef.current;
+
+    if (!isClientConnected || code.length < 4) {
       setRoomStatus(null);
+      if (client && currentTopicRef.current && client.connected) {
+        client.unsubscribe(currentTopicRef.current);
+      }
+      currentTopicRef.current = null;
+      return;
     }
-  }, [roomCode, isJoining]);
+    
+    // Set loading state immediately for better UX
+    setRoomStatus({ status: 'loading' });
+
+    debounceTimeoutRef.current = setTimeout(() => {
+      if (!client || !client.connected) {
+        setRoomStatus({ status: 'not_found', message: 'Ошибка сети' });
+        return;
+      }
+
+      // Unsubscribe from the previous topic
+      if (currentTopicRef.current) {
+        client.unsubscribe(currentTopicRef.current);
+      }
+      
+      const newTopic = `${MQTT_TOPIC_PREFIX}/${code}`;
+      currentTopicRef.current = newTopic;
+      client.subscribe(newTopic);
+      
+      // Set a timeout for the 'not_found' case
+      statusCheckTimeoutRef.current = setTimeout(() => {
+        setRoomStatus({ status: 'not_found' });
+      }, 2000); // 2 seconds is plenty for a response over an existing connection
+
+    }, 300); // 300ms debounce delay
+
+  }, [roomCode, isClientConnected]);
 
   const generateRoomCode = () => {
     const chars = 'АБВГДЕЖЗИКЛМНПРСТУФХЦЧШЫЭЮЯ123456789';
@@ -112,7 +127,7 @@ const Lobby = ({ onStartGame }) => {
   };
 
   const handleStart = () => {
-    const finalRoomCode = roomCode.trim();
+    const finalRoomCode = roomCode.trim().toUpperCase();
     const finalPlayerName = playerName.trim();
     if (finalRoomCode.length >= 4 && finalPlayerName.length > 2) {
       localStorage.setItem('tysiacha-playerName', finalPlayerName);
@@ -121,34 +136,46 @@ const Lobby = ({ onStartGame }) => {
   };
   
   const RoomStatusInfo = () => {
-    if (!isJoining || !roomStatus) return null;
+    if (!roomCode || roomCode.trim().length < 4) return React.createElement('div', { className: "text-sm text-gray-400 mt-2 min-h-[20px]" }, 'Код должен быть не менее 4 символов');
+    if (!isClientConnected) return React.createElement('div', { className: "text-sm text-gray-400 mt-2 min-h-[20px] flex items-center justify-center" }, React.createElement('div', {className: "w-4 h-4 border-2 border-t-transparent border-yellow-300 rounded-full animate-spin mr-2"}), 'Подключение к сети...');
+    if (!roomStatus) return React.createElement('div', { className: "text-sm text-gray-400 mt-2 min-h-[20px]" }, 'Придумайте код или введите существующий');
     
     let content;
+    let icon;
+    
     switch(roomStatus.status) {
         case 'loading':
-            content = React.createElement('div', { className: "flex items-center" }, 
-                React.createElement('div', {className: "w-4 h-4 border-2 border-t-transparent border-yellow-300 rounded-full animate-spin mr-2"}),
-                'Проверка комнаты...'
-            );
+            icon = React.createElement('div', {className: "w-4 h-4 border-2 border-t-transparent border-yellow-300 rounded-full animate-spin mr-2"});
+            content = 'Проверка комнаты...';
             break;
         case 'not_found':
-            content = roomStatus.message || 'Комната не найдена или пуста.';
+            icon = React.createElement('svg', { xmlns:"http://www.w3.org/2000/svg", className:"h-5 w-5 mr-2 text-blue-400", viewBox:"0 0 20 20", fill:"currentColor" }, React.createElement('path', { fillRule:"evenodd", d:"M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z", clipRule:"evenodd" }));
+            content = roomStatus.message || 'Комната не найдена. Можно создать новую.';
             break;
-        case 'active':
-        case 'waiting':
-            content = `${roomStatus.message}. Хост: ${roomStatus.host}`;
+        case 'found':
+            icon = React.createElement('svg', { xmlns:"http://www.w3.org/2000/svg", className:"h-5 w-5 mr-2 text-green-400", viewBox:"0 0 20 20", fill:"currentColor" }, React.createElement('path', { fillRule:"evenodd", d:"M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z", clipRule:"evenodd" }));
+            const { hostName, playerCount } = roomStatus.data || {};
+            if (hostName && typeof playerCount === 'number') {
+                content = `Хост: ${hostName}, Игроков: ${playerCount}/5`;
+            } else {
+                content = 'Комната найдена. Можно войти.';
+            }
             break;
         default:
-            return null;
+            return React.createElement('div', { className: "text-sm text-gray-400 mt-2 min-h-[20px]" }, 'Придумайте код или введите существующий');
     }
     
-    return React.createElement('div', { className: "text-sm text-gray-400 mt-2 min-h-[20px]" }, content);
+    return React.createElement('div', { className: "text-sm text-gray-400 mt-2 min-h-[20px] flex items-center justify-center" }, icon, content);
   }
+
+  const buttonText = roomStatus?.status === 'found' ? 'Войти в игру' : 'Создать и войти';
+  const isButtonDisabled = roomCode.trim().length < 4 || playerName.trim().length < 3 || roomStatus?.status === 'loading' || !isClientConnected;
+
 
   return React.createElement(
     'div',
     { className: "w-full max-w-md p-8 bg-slate-800/80 backdrop-blur-md rounded-xl shadow-2xl border border-slate-700 text-center" },
-    React.createElement('h2', { className: "font-ruslan text-2xl sm:text-4xl lg:text-5xl text-yellow-300 mb-6" }, isJoining ? 'Присоединиться' : 'Создать Игру'),
+    React.createElement('h2', { className: "font-ruslan text-2xl sm:text-4xl lg:text-5xl text-yellow-300 mb-6" }, 'Вход в игру'),
     React.createElement(
       'div',
       { className: "space-y-6" },
@@ -175,43 +202,26 @@ const Lobby = ({ onStartGame }) => {
         React.createElement(
           'label',
           { htmlFor: "roomCode", className: "block text-lg font-semibold text-gray-300 mb-2" },
-          isJoining ? 'Введите код комнаты' : 'Код вашей комнаты'
+          'Код комнаты'
         ),
-        React.createElement('div', { className: "relative" },
-          React.createElement('input', {
-            id: "roomCode",
-            type: "text",
-            value: roomCode,
-            onChange: (e) => setRoomCode(e.target.value.toUpperCase()),
-            className: "w-full p-3 text-center bg-slate-900 border-2 border-slate-600 rounded-lg text-2xl font-mono tracking-widest text-white focus:outline-none focus:border-yellow-400 transition-colors"
-          })
-        ),
-        isJoining ? React.createElement(RoomStatusInfo) : React.createElement('p', { className: "text-sm text-gray-400 mt-2" }, 'Поделитесь этим кодом с друзьями')
+        React.createElement('input', {
+          id: "roomCode",
+          type: "text",
+          value: roomCode,
+          onChange: (e) => setRoomCode(e.target.value.toUpperCase()),
+          placeholder: "Введите код",
+          className: "w-full p-3 text-center bg-slate-900 border-2 border-slate-600 rounded-lg text-2xl font-mono tracking-widest text-white focus:outline-none focus:border-yellow-400 transition-colors"
+        }),
+        React.createElement(RoomStatusInfo, null)
       ),
       React.createElement(
         'button',
         {
           onClick: handleStart,
           className: "w-full py-3 bg-green-600 hover:bg-green-700 rounded-lg text-xl font-bold uppercase tracking-wider transition-all duration-300 transform hover:scale-105 shadow-lg disabled:bg-gray-500 disabled:cursor-not-allowed",
-          disabled: roomCode.trim().length < 4 || playerName.trim().length < 3 || (isJoining && roomStatus?.status === 'not_found')
+          disabled: isButtonDisabled
         },
-        isJoining ? 'Войти' : 'Начать игру'
-      ),
-      React.createElement(
-        'div',
-        { className: "relative flex py-2 items-center" },
-        React.createElement('div', { className: "flex-grow border-t border-gray-600" }),
-        React.createElement('span', { className: "flex-shrink mx-4 text-gray-400" }, 'ИЛИ'),
-        React.createElement('div', { className: "flex-grow border-t border-gray-600" })
-      ),
-      React.createElement(
-        'button',
-        {
-          onClick: () => setIsJoining(!isJoining),
-          className: "w-full py-3 bg-blue-600 hover:bg-blue-700 rounded-lg text-xl font-bold uppercase tracking-wider transition-all duration-300 transform hover:scale-105 shadow-lg disabled:bg-gray-500 disabled:cursor-not-allowed",
-          disabled: playerName.trim().length < 3
-        },
-        isJoining ? 'Создать свою игру' : 'Присоединиться к игре'
+        buttonText
       )
     )
   );
