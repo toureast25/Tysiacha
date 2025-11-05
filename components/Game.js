@@ -781,7 +781,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
 
             const newPlayers = newState.players.map((p, i) =>
                 i === joinIndex
-                ? { ...p, name: request.name, isClaimed: true, scores: initialScores, status: 'online', isSpectator: false, sessionId: request.sessionId, hasEnteredGame: restoredScore > 0, barrelBolts: 0 } // Восстанавливаем статус входа
+                ? { ...p, name: request.name, isClaimed: true, scores: initialScores, status: 'online', isSpectator: false, sessionId: request.sessionId, hasEnteredGame: restoredScore > 0, barrelBolts: 0 }
                 : p
             );
             newState = { ...newState, players: newPlayers, leavers: newLeavers, gameMessage: `${request.name} присоединился к игре.` };
