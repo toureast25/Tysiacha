@@ -161,8 +161,9 @@ const RulesModal = ({ onClose }) => {
                 React.createElement('dt', { className: "font-semibold text-lg text-white" }, 'Штраф за обгон'),
                 React.createElement(
                   'dd',
-                  { className: "ml-4" },
-                  'Если другой игрок своим ходом догоняет или обгоняет вас по очкам, вы получаете штраф -50 очков. Штраф применяется, только если у вас было 100 или более очков.'
+                  { className: "ml-4 space-y-2" },
+                   React.createElement('p', null, 'Если другой игрок своим ходом догоняет или обгоняет вас по очкам, вы получаете штраф -50 очков. Штраф применяется, только если у вас было 100 или более очков.'),
+                   React.createElement('p', null, React.createElement('strong', { className: 'text-yellow-400' }, 'Исключение:'), ' Штраф не начисляется, если из-за него ваш счёт попадёт в диапазон "бочки" (например, при счёте 210 вы не получите штраф до 160).')
                 )
             ),
             React.createElement('div', null,

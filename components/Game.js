@@ -641,9 +641,18 @@ const Game = ({ roomCode, playerName, onExit }) => {
         }
         
         // Штраф за обгон
-        if (currentPlayerNewTotal >= otherPlayerOldTotal && otherPlayerOldTotal >= 100) {
-            penaltyMessages.push(`${p.name} получает штраф -50.`);
-            penaltiesToAdd.push(-50);
+        if (totalScoreBeforeTurn < otherPlayerOldTotal && currentPlayerNewTotal >= otherPlayerOldTotal && otherPlayerOldTotal >= 100) {
+            const scoreAfterPenalty = otherPlayerOldTotal - 50;
+            const wouldLandOnBarrel = 
+                (scoreAfterPenalty >= 200 && scoreAfterPenalty < 300) ||
+                (scoreAfterPenalty >= 700 && scoreAfterPenalty < 800);
+
+            if (!wouldLandOnBarrel) {
+                penaltyMessages.push(`${p.name} получает штраф -50.`);
+                penaltiesToAdd.push(-50);
+            } else {
+                penaltyMessages.push(`${p.name} избежал штрафа (-50), чтобы не попасть на бочку.`);
+            }
         }
         
         if (penaltiesToAdd.length > 0) {
