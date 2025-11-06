@@ -2,7 +2,7 @@
 import React from 'react';
 import { MQTT_BROKER_URL, MQTT_TOPIC_PREFIX } from '../constants.js';
 
-const Lobby = ({ onStartGame, initialRoomCode }) => {
+const Lobby = ({ onStartGame }) => {
   const [roomCode, setRoomCode] = React.useState('');
   const [playerName, setPlayerName] = React.useState('');
   const [roomStatus, setRoomStatus] = React.useState(null); // { status: 'loading' | 'found' | 'not_found', message?: string, data?: { hostName: string, playerCount: number } }
@@ -19,20 +19,13 @@ const Lobby = ({ onStartGame, initialRoomCode }) => {
     if (savedName) {
       setPlayerName(savedName);
     }
-    
-    if (initialRoomCode) {
-        setRoomCode(initialRoomCode);
-        // Очищаем query-параметр из URL, чтобы при перезагрузке он не мешал
-        window.history.replaceState({}, document.title, window.location.pathname);
+    const lastRoom = localStorage.getItem('tysiacha-lastRoom');
+    if (lastRoom) {
+      setRoomCode(lastRoom);
     } else {
-        const lastRoom = localStorage.getItem('tysiacha-lastRoom');
-        if (lastRoom) {
-          setRoomCode(lastRoom);
-        } else {
-          generateRoomCode();
-        }
+      generateRoomCode();
     }
-  }, [initialRoomCode]);
+  }, []);
 
   // Effect to manage the single MQTT client lifecycle
   React.useEffect(() => {

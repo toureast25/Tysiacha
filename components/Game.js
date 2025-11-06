@@ -15,7 +15,6 @@ const Game = ({ roomCode, playerName, onExit }) => {
   const [isSpectatorsModalOpen, setIsSpectatorsModalOpen] = React.useState(false);
   const [showRules, setShowRules] = React.useState(false);
   const [isDragOver, setIsDragOver] = React.useState(false);
-  const [copyStatus, setCopyStatus] = React.useState(null); // null, 'copied', 'error'
   
   const mqttClientRef = React.useRef(null);
   const isStateReceivedRef = React.useRef(false);
@@ -626,26 +625,29 @@ const Game = ({ roomCode, playerName, onExit }) => {
         const otherPlayerOldTotal = calculateTotalScore(originalPlayerState);
         const penaltiesToAdd = [];
 
-        // Проверяем столкновение на бочке
-        const otherPlayerBarrelStatus = getPlayerBarrelStatus(originalPlayerState);
-        if (newBarrelStatus && otherPlayerBarrelStatus === newBarrelStatus) {
-            penaltyMessages.push(`${p.name} сбит с бочки.`);
-            let penaltyAmount = 0;
-            if (newBarrelStatus === '200-300') {
-                penaltyAmount = 150 - otherPlayerOldTotal;
-            } else { // 700-800
-                penaltyAmount = 650 - otherPlayerOldTotal;
+        // Штраф за столкновение на бочке
+        if (newBarrelStatus) {
+            const otherPlayerBarrelStatus = getPlayerBarrelStatus(originalPlayerState);
+            if (otherPlayerBarrelStatus === newBarrelStatus) {
+                penaltyMessages.push(`${p.name} сбит с бочки.`);
+                let penaltyAmount = 0;
+                if (newBarrelStatus === '200-300') {
+                    penaltyAmount = 150 - otherPlayerOldTotal;
+                } else { // 700-800
+                    penaltyAmount = 650 - otherPlayerOldTotal;
+                }
+                penaltiesToAdd.push(penaltyAmount);
             }
-            penaltiesToAdd.push(penaltyAmount);
         }
-
-        // Проверяем штраф за обгон (независимо от бочки)
-        if (totalScoreBeforeTurn < otherPlayerOldTotal && currentPlayerNewTotal >= otherPlayerOldTotal && otherPlayerOldTotal >= 100) {
+        
+        // Штраф за обгон
+        if (currentPlayerNewTotal >= otherPlayerOldTotal && otherPlayerOldTotal >= 100) {
             penaltyMessages.push(`${p.name} получает штраф -50.`);
             penaltiesToAdd.push(-50);
         }
         
         if (penaltiesToAdd.length > 0) {
+            // Убедимся, что штрафы не дублируются, если игрок уже был оштрафован на бочке
             const uniquePenalties = [...new Set(penaltiesToAdd)];
             return { ...p, scores: [...p.scores, ...uniquePenalties] };
         }
@@ -1043,17 +1045,6 @@ const Game = ({ roomCode, playerName, onExit }) => {
     }
   };
   
-  const handleCopyRoomCode = React.useCallback(() => {
-    const url = `${window.location.origin}${window.location.pathname}?room/${roomCode}`;
-    navigator.clipboard.writeText(url).then(() => {
-        setCopyStatus('copied');
-        setTimeout(() => setCopyStatus(null), 2000);
-    }, () => {
-        setCopyStatus('error');
-        setTimeout(() => setCopyStatus(null), 2000);
-    });
-  }, [roomCode]);
-
   const PlayerStatus = ({ player }) => {
     if (!player.isClaimed || player.isSpectator) return null;
     const statusMap = {
@@ -1148,20 +1139,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
     React.createElement(
       'div', { className: "w-full h-full flex flex-col p-4 text-white overflow-hidden" },
       React.createElement('header', { className: `flex justify-between items-center mb-4 flex-shrink-0 transition-opacity duration-300 ${isScoreboardExpanded ? 'opacity-0 pointer-events-none lg:opacity-100 lg:pointer-events-auto' : 'opacity-100'}` },
-        React.createElement('div', {
-            onClick: handleCopyRoomCode,
-            className: "p-2 bg-black/50 rounded-lg text-sm cursor-pointer hover:bg-black/70 transition-colors",
-            title: "Нажмите, чтобы скопировать ссылку-приглашение"
-        }, React.createElement('p', {
-            className: `font-mono transition-colors duration-200 ${
-                copyStatus === 'copied' ? 'text-green-400' :
-                copyStatus === 'error' ? 'text-red-500' : ''
-            }`
-        }, 
-            copyStatus === 'copied' ? 'ССЫЛКА СКОПИРОВАНА!' :
-            copyStatus === 'error' ? 'ОШИБКА КОПИРОВАНИЯ' :
-            `КОД КОМНАТЫ: ${roomCode}`
-        )),
+        React.createElement('div', { className: "p-2 bg-black/50 rounded-lg text-sm" }, React.createElement('p', { className: "font-mono" }, `КОД КОМНАТЫ: ${roomCode}`)),
         React.createElement('h1', { onClick: () => setShowRules(true), className: "font-ruslan text-4xl text-yellow-300 cursor-pointer hover:text-yellow-200 transition-colors", title: "Показать правила" }, 'ТЫСЯЧА'),
         React.createElement('button', { onClick: handleLeaveGame, className: "px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg font-bold" }, isSpectator || canJoin ? 'Вернуться в лобби' : 'Выйти из игры')
       ),
@@ -1218,110 +1196,110 @@ const Game = ({ roomCode, playerName, onExit }) => {
                                 isHostPlayer && React.createElement('svg', { xmlns: "http://www.w3.org/2000/svg", className: "h-4 w-4 mr-1 text-yellow-400", viewBox: "0 0 24 24", fill: "currentColor" },
                                   React.createElement('path', { d: "M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5z" })
                                 ),
-                                React.createElement('span', { className: "font-bold truncate px-1 text-base" }, player.name)
+                                React.createElement('span', { className: "px-1" }, player.name)
                               ),
-                              React.createElement(PlayerStatus, { player: player }),
-                              barrelStatus && React.createElement('div', { className: "absolute bottom-1 text-xs bg-red-600 px-1 rounded" }, "НА БОЧКЕ")
+                              !player.hasEnteredGame && gameState.isGameStarted && React.createElement('span', { className: "text-xs font-normal text-cyan-300 italic", title: "Нужно набрать 50+ очков для входа" }, '(на старте)'),
+                              barrelStatus && React.createElement('span', { className: "text-xs font-normal text-orange-400 italic", title: `Нужно набрать очков, чтобы стало ${barrelStatus === '200-300' ? '300+' : '800+'}` }, '(на бочке)'),
+                              barrelStatus && player.barrelBolts > 0 && React.createElement('span', { className: 'text-xs font-bold text-red-500 ml-1' }, '/'.repeat(player.barrelBolts)),
+                              React.createElement(PlayerStatus, { player: player })
                             )
                     );
                   })
                 )
               ),
-               React.createElement('tbody', { className: "divide-y divide-slate-700" },
+              React.createElement('tbody', { className: `lg:table-row-group ${isScoreboardExpanded ? '' : 'hidden'}` },
                 (() => {
-                  const maxScores = Math.max(1, ...gameState.players.map(p => p.scores.length));
+                  const hasAnyPlayerJoined = gameState.players.some(p => p.isClaimed || p.isSpectator || p.name !== `Игрок ${p.id + 1}`);
+                  const maxRounds = gameState.players.reduce((max, p) => Math.max(max, (p.scores ? p.scores.length : 0)), 0);
+
+                  if (!hasAnyPlayerJoined) {
+                     return React.createElement('tr', null, React.createElement('td', { colSpan: gameState.players.length, className: "py-4 px-2 text-center text-gray-400 italic" }, 'Ожидание игроков...'));
+                  }
+                  if (maxRounds === 0 && gameState.isGameStarted) {
+                     return React.createElement('tr', null, React.createElement('td', { colSpan: gameState.players.length, className: "py-4 px-2 text-center text-gray-400 italic" }, 'Никто еще не вошел в игру.'));
+                  }
+                  if (maxRounds === 0) {
+                     return React.createElement('tr', null, React.createElement('td', { colSpan: gameState.players.length, className: "py-4 px-2 text-center text-gray-400 italic" }, 'Еще не было записано очков.'));
+                  }
+                  
                   const rows = [];
-                  for (let i = 0; i < maxScores; i++) {
-                    rows.push(React.createElement('tr', { key: `score-row-${i}`, className: "bg-slate-800/20" },
-                      gameState.players.map(player => React.createElement('td', { key: `score-cell-${player.id}-${i}`, className: "px-2 py-1 text-center font-mono" },
-                        player.scores[i] !== undefined ? player.scores[i] : ''
-                      ))
+                  for (let i = 0; i < maxRounds; i++) {
+                    rows.push(React.createElement('tr', { key: `round-row-${i}`, className: "border-b border-slate-700 hover:bg-slate-700/30" },
+                      gameState.players.map(player =>
+                        React.createElement('td', { key: `cell-${player.id}-${i}`, className: "py-2 px-2 text-center font-mono" },
+                           (player.isClaimed || player.isSpectator || player.scores.length > i) && player.scores[i] !== undefined ? player.scores[i] : React.createElement('span', { className: "text-slate-500" }, '-')
+                        )
+                      )
                     ));
                   }
-                  rows.push(React.createElement('tr', { key: "total-score-row", className: "bg-slate-900/50 font-bold" },
-                    gameState.players.map(player => React.createElement('td', { key: `total-score-cell-${player.id}`, className: "px-2 py-2 text-center text-lg text-yellow-300" },
-                      player.isClaimed ? calculateTotalScore(player) : '-'
-                    ))
-                  ));
                   return rows;
                 })()
+              ),
+              React.createElement('tfoot', { className: "sticky bottom-0 bg-slate-800 font-bold text-white border-t-2 border-slate-500" },
+                 React.createElement('tr', null, gameState.players.map((player) => {
+                   const index = player.id;
+                   const hasHistory = player.isClaimed || player.isSpectator || player.name !== `Игрок ${player.id + 1}`;
+                   return React.createElement('td', { key: `total-score-${player.id}`, className: `h-10 px-2 text-center text-lg font-mono align-middle transition-colors duration-300 ${index === gameState.currentPlayerIndex && gameState.isGameStarted && !gameState.isGameOver && player.isClaimed ? 'bg-yellow-400/80 text-slate-900' : 'bg-slate-900/50'} ${index === myPlayerId ? 'outline outline-2 outline-blue-400' : ''}` }, 
+                     hasHistory ? calculateTotalScore(player) : ''
+                   );
+                 }))
               )
             )
           )
         ),
-        React.createElement('main', { className: "lg:col-span-3 flex-grow flex flex-col bg-slate-800/80 rounded-xl border border-slate-700 p-4 min-h-0" },
-          canJoin ? React.createElement('div', { className: "m-auto text-center flex flex-col items-center" },
-            isAwaitingApproval 
-                ? React.createElement(AwaitingApprovalScreen, null)
-                : React.createElement(React.Fragment, null,
-                    React.createElement('h3', { className: "font-ruslan text-4xl text-yellow-300" }, `Комната "${roomCode}"`),
-                    React.createElement('p', { className: "mt-4 text-lg" }, `Мест для игроков: ${availableSlotsForJoin}/5.`),
-                    React.createElement('button', { onClick: handleJoinGame, className: "mt-6 px-8 py-3 bg-green-600 hover:bg-green-700 rounded-lg text-xl font-bold uppercase tracking-wider transition-all duration-300 transform hover:scale-105 shadow-lg" }, 'Присоединиться к игре'),
-                    React.createElement('button', { onClick: handleLeaveGame, className: "mt-4 text-sm text-gray-400 hover:text-white" }, 'Присоединиться зрителем или выйти')
-                  )
-          ) : isSpectator ? React.createElement('div', { className: "m-auto text-center flex flex-col items-center" },
-            React.createElement('h3', { className: "font-ruslan text-4xl text-yellow-300" }, 'Вы зритель'),
-            React.createElement('p', { className: "mt-4 text-lg" }, 'Вы наблюдаете за игрой.'),
-            React.createElement('p', { className: "mt-2 text-gray-400" }, `Ход игрока: ${gameState.players[gameState.currentPlayerIndex].name}`)
-          ) : React.createElement(React.Fragment, null,
-            React.createElement(JoinRequestManager, null),
-            React.createElement('div', { className: "bg-black/40 rounded-lg p-2 text-center mb-4 flex-shrink-0" },
-                React.createElement('p', { className: "text-lg text-yellow-300" }, displayMessage)
+        React.createElement('main', { className: `relative flex-grow lg:col-span-3 bg-slate-900/70 rounded-xl border-2 flex flex-col justify-between min-h-0 p-4 transition-all duration-300 ${isDragOver && isMyTurn ? 'border-green-400 shadow-2xl shadow-green-400/20' : 'border-slate-600'} ${isScoreboardExpanded ? 'opacity-0 pointer-events-none lg:opacity-100 lg:pointer-events-auto' : 'opacity-100'}`, onDragOver: (e) => {e.preventDefault(); setIsDragOver(true);}, onDrop: handleDrop, onDragLeave: () => setIsDragOver(false) },
+          React.createElement(JoinRequestManager, null),
+          React.createElement('div', { className: "w-full" },
+            React.createElement('div', { className: `w-full p-3 mb-4 text-center rounded-lg ${gameState.isGameOver ? 'bg-green-600' : 'bg-slate-800'} border border-slate-600 flex items-center justify-center min-h-[72px]` },
+              React.createElement('p', { className: "text-lg font-semibold" }, displayMessage)
             ),
-            React.createElement('div', { className: "flex-grow flex flex-col justify-between" },
-              React.createElement('div', { 
-                  className: `h-28 flex-shrink-0 bg-black/30 rounded-lg border-2 ${isDragOver ? 'border-yellow-400' : 'border-dashed border-slate-600'} flex items-center justify-center p-4 transition-colors`,
-                  onDragOver: (e) => { e.preventDefault(); setIsDragOver(true); },
-                  onDragLeave: () => setIsDragOver(false),
-                  onDrop: handleDrop
-                },
-                gameState.keptDiceThisTurn.length > 0 ? 
-                  React.createElement('div', { className: 'flex gap-2 flex-wrap justify-center' },
-                    gameState.keptDiceThisTurn.map((val, i) => React.createElement(SmallDiceIcon, { key: `kept-${i}`, value: val }))
-                  ) :
-                  React.createElement('p', { className: 'text-slate-400' }, 'Перетащите сюда очковые кости')
-              ),
-              React.createElement('div', { className: "flex-grow flex items-center justify-center py-4 my-4 min-h-[100px]" },
-                gameState.diceOnBoard.length > 0 ?
-                  React.createElement('div', { className: 'flex gap-2 sm:gap-4 flex-wrap justify-center' },
-                    gameState.diceOnBoard.map((val, i) => React.createElement(DiceIcon, { 
-                      key: `board-${i}`, 
-                      value: val, 
-                      isSelected: gameState.selectedDiceIndices.includes(i),
-                      onClick: isMyTurn ? () => handleToggleDieSelection(i) : undefined,
-                      onDragStart: isMyTurn ? (e) => handleDragStart(e, i) : undefined,
-                      onDoubleClick: isMyTurn ? () => handleDieDoubleClick(i) : undefined,
-                    }))
-                  ) :
-                  React.createElement('div', { className: "text-slate-400 text-lg" }, gameState.isGameStarted ? 'Бросайте кости!' : 'Ожидание начала игры...')
-              ),
-              React.createElement('div', { className: "flex-shrink-0" },
-                React.createElement('div', { className: "bg-black/40 rounded-lg p-3 text-center mb-4 min-h-[72px] flex items-center justify-center" },
-                    isMyTurn && gameState.isGameStarted && React.createElement('div', { className: 'flex flex-col' }, 
-                        React.createElement('p', { className: "text-2xl" }, React.createElement('span', { className: 'text-gray-400' }, 'Очки за ход: '), React.createElement('span', { className: 'font-bold text-yellow-300' }, gameState.currentTurnScore)),
-                        gameState.potentialScore > 0 && React.createElement('p', { className: 'text-lg text-green-400 animate-pulse' }, `(+${gameState.potentialScore} с выбранных)`)
-                    )
-                ),
-                React.createElement('div', { className: "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" },
-                  isMyTurn ? React.createElement(React.Fragment, null,
-                    React.createElement('button', { 
-                        onClick: handleRollDice, 
-                        disabled: !gameState.canRoll || gameState.isGameOver,
-                        className: "col-span-1 lg:col-span-2 py-4 bg-blue-600 hover:bg-blue-700 rounded-lg text-2xl font-bold uppercase tracking-wider transition-all duration-300 transform hover:scale-105 shadow-lg disabled:bg-gray-500 disabled:cursor-not-allowed" 
-                    }, rollButtonText),
-                    React.createElement('button', { 
-                        onClick: handleBankScore, 
-                        disabled: !gameState.canBank || gameState.isGameOver,
-                        className: "py-4 bg-green-600 hover:bg-green-700 rounded-lg text-2xl font-bold uppercase tracking-wider transition-all duration-300 transform hover:scale-105 shadow-lg disabled:bg-gray-500 disabled:cursor-not-allowed" 
-                    }, 'Записать')
-                  ) : gameState.isGameOver ? React.createElement('div', { className: "col-span-full" },
-                    isHost && claimedPlayerCount >= 2 ? React.createElement('button', { onClick: handleNewGame, className: "w-full py-4 bg-yellow-500 hover:bg-yellow-600 text-slate-900 rounded-lg text-2xl font-bold uppercase" }, 'Новая игра')
-                    : isHost && React.createElement('p', { className: "text-center col-span-full" }, 'Нужно минимум 2 игрока для новой игры.')
-                  ) : !gameState.isGameStarted && isHost && claimedPlayerCount >= 2 ? React.createElement('button', { onClick: handleStartOfficialGame, className: "col-span-full py-4 bg-yellow-500 hover:bg-yellow-600 text-slate-900 rounded-lg text-2xl font-bold uppercase" }, 'Начать игру')
-                  : showSkipButton ? React.createElement('button', { onClick: handleSkipTurn, className: "col-span-full py-4 bg-yellow-600 hover:bg-yellow-700 rounded-lg text-xl font-bold uppercase" }, `Пропустить ход ${currentPlayer.name} (бездействует)`)
-                  : null
+            React.createElement('div', { className: "w-full flex justify-center md:justify-end" },
+              React.createElement('div', { className: "p-3 rounded-lg bg-black/40 border border-slate-700 w-full md:w-auto md:min-w-[300px]" },
+                React.createElement('p', { className: "text-xs text-gray-400 mb-2 text-center uppercase tracking-wider" }, 'Отложено'),
+                React.createElement('div', { className: "flex gap-2 flex-wrap justify-center min-h-[40px] items-center" },
+                  gameState.keptDiceThisTurn.length > 0
+                    ? gameState.keptDiceThisTurn.map((value, i) => React.createElement(SmallDiceIcon, { key: `kept-${i}`, value: value }))
+                    : React.createElement('span', { className: "text-slate-500 italic" }, 'Пусто')
                 )
               )
+            )
+          ),
+          React.createElement('div', { className: "flex-grow w-full flex flex-col items-center justify-center pt-3 pb-6" },
+            React.createElement('div', { className: "w-full sm:max-w-[480px] flex items-center justify-between min-h-[80px]" },
+              gameState.diceOnBoard.map((value, i) => React.createElement(DiceIcon, { key: `board-${i}`, value: value, isSelected: gameState.selectedDiceIndices.includes(i), onClick: isMyTurn ? () => handleToggleDieSelection(i) : null, onDragStart: isMyTurn ? (e) => handleDragStart(e, i) : null, onDoubleClick: isMyTurn ? () => handleDieDoubleClick(i) : null })),
+              Array.from({ length: 5 - gameState.diceOnBoard.length }).map((_, i) => React.createElement(DiceIcon, { key: `placeholder-${i}`, value: 0 }))
+            )
+          ),
+          React.createElement('div', { className: "w-full" },
+             showSkipButton && React.createElement('div', {className: 'text-center mb-2'}, React.createElement('button', {onClick: handleSkipTurn, className: 'px-4 py-2 bg-orange-600 hover:bg-orange-700 rounded-lg font-bold animate-pulse'}, `Пропустить ход ${currentPlayer.name}`)),
+            React.createElement('div', { className: "text-center mb-4" },
+              React.createElement('p', { className: "text-xl" }, 'Очки за ход: ', React.createElement('span', { className: "font-ruslan text-5xl text-green-400" }, gameState.currentTurnScore + gameState.potentialScore))
+            ),
+            React.createElement('div', { className: "max-w-2xl mx-auto w-full" },
+              isAwaitingApproval
+                ? React.createElement(AwaitingApprovalScreen, null)
+                : canJoin
+                  ? React.createElement('button', { 
+                      onClick: handleJoinGame, 
+                      disabled: availableSlotsForJoin === 0, 
+                      className: "w-full py-4 bg-green-600 hover:bg-green-700 rounded-lg text-2xl font-bold uppercase tracking-wider transition-all duration-300 transform hover:scale-105 shadow-lg disabled:bg-gray-500 disabled:cursor-not-allowed disabled:scale-100" 
+                    }, 
+                      availableSlotsForJoin > 0 ? `Войти в игру (${availableSlotsForJoin} мест)` : 'Нет свободных мест'
+                    )
+                  : gameState.isGameOver
+                    ? (isHost
+                        ? React.createElement('button', { onClick: handleNewGame, disabled: claimedPlayerCount < 2, className: "w-full py-4 bg-blue-600 hover:bg-blue-700 rounded-lg text-2xl font-bold uppercase tracking-wider transition-all duration-300 transform hover:scale-105 shadow-lg disabled:bg-gray-500 disabled:cursor-not-allowed disabled:scale-100" }, 'Новая Игра')
+                        : null
+                      )
+                    : !gameState.isGameStarted 
+                      ? (isHost
+                          ? React.createElement('button', { onClick: handleStartOfficialGame, disabled: claimedPlayerCount < 2, className: "w-full py-4 bg-blue-600 hover:bg-blue-700 rounded-lg text-2xl font-bold uppercase tracking-wider transition-all duration-300 transform hover:scale-105 shadow-lg disabled:bg-gray-500 disabled:cursor-not-allowed disabled:scale-100" }, 'Начать игру')
+                          : React.createElement('div', { className: "text-center text-lg text-gray-400" }, 'Ожидание начала игры от хоста...')
+                        )
+                      : React.createElement('div', { className: "grid grid-cols-2 gap-4" },
+                          React.createElement('button', { onClick: handleRollDice, disabled: !isMyTurn || !gameState.canRoll, className: "w-full py-3 bg-green-600 hover:bg-green-700 rounded-lg text-xl font-bold uppercase tracking-wider transition-all duration-300 transform hover:scale-105 shadow-lg disabled:bg-gray-500 disabled:cursor-not-allowed disabled:scale-100" }, rollButtonText),
+                          React.createElement('button', { onClick: handleBankScore, disabled: !isMyTurn || !gameState.canBank, className: "w-full py-3 bg-yellow-500 hover:bg-yellow-600 text-slate-900 rounded-lg text-xl font-bold uppercase tracking-wider transition-all duration-300 transform hover:scale-105 shadow-lg disabled:bg-gray-500 disabled:cursor-not-allowed disabled:scale-100" }, 'Записать')
+                        )
             )
           )
         )
