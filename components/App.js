@@ -72,16 +72,29 @@ const App = () => {
     const urlParams = new URLSearchParams(window.location.search);
     const roomCodeFromUrl = urlParams.get('room');
 
+    // Case 1: Joining via URL
     if (roomCodeFromUrl) {
-      localStorage.removeItem('tysiacha-session');
-      setGameProps({});
-      setScreen('LOBBY');
-      setInitialRoomCode(roomCodeFromUrl.toUpperCase());
-      // Clean up the URL to not show the room code after it's been read
+      // Clean up the URL immediately to prevent issues on refresh
       window.history.replaceState({}, document.title, window.location.pathname);
-      return;
+      
+      const savedPlayerName = localStorage.getItem('tysiacha-playerName');
+      
+      // Always clear a full session when joining from a link to prevent conflicts
+      localStorage.removeItem('tysiacha-session');
+
+      if (savedPlayerName) {
+        // Player name exists, bypass lobby and go straight to the game
+        handleStartGame(roomCodeFromUrl.toUpperCase(), savedPlayerName);
+      } else {
+        // No player name, go to lobby with pre-filled room code
+        setGameProps({}); // Ensure no old game props are lingering
+        setScreen('LOBBY');
+        setInitialRoomCode(roomCodeFromUrl.toUpperCase());
+      }
+      return; // Stop further processing
     }
     
+    // Case 2: Resuming a previous session (no room in URL)
     try {
         const savedSession = localStorage.getItem('tysiacha-session');
         if (savedSession) {
@@ -98,6 +111,7 @@ const App = () => {
     localStorage.removeItem('tysiacha-session');
     setGameProps({});
     setScreen('LOBBY');
+    setInitialRoomCode(null); // Reset initial code on exit
   }, []);
 
   const renderScreen = () => {
