@@ -367,6 +367,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
           }
           updatedPlayer.scores.push(penalty);
           updatedPlayer.barrelBolts = 0; // Reset after penalty
+          updatedPlayer.justResetFromBarrel = true; // Установка флага иммунитета
         }
       }
       
@@ -380,10 +381,12 @@ const Game = ({ roomCode, playerName, onExit }) => {
       if (!nextPlayer.hasEnteredGame) {
         gameMessage += ` Ему нужно 50+ для входа.`;
       }
+      
+      const finalPlayersForNextTurn = newPlayers.map(p => ({ ...p, justResetFromBarrel: false }));
 
       const boltState = {
         ...createInitialState(),
-        players: newPlayers,
+        players: finalPlayersForNextTurn,
         spectators: state.spectators,
         leavers: state.leavers,
         hostId: state.hostId,
@@ -535,6 +538,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
           }
           updatedPlayer.scores.push(penalty);
           updatedPlayer.barrelBolts = 0; // Reset
+          updatedPlayer.justResetFromBarrel = true; // Установка флага иммунитета
         }
       }
       const newPlayersWithBolt = state.players.map((p, i) => i === state.currentPlayerIndex ? updatedPlayer : p);
@@ -542,7 +546,10 @@ const Game = ({ roomCode, playerName, onExit }) => {
       const nextPlayer = newPlayersWithBolt[nextIdx];
       let msg = `${currentPlayer.name} получает болт. Ход ${nextPlayer.name}.`;
       if (!nextPlayer.hasEnteredGame) msg += ` Ему нужно 50+ для входа.`;
-      const boltState = { ...createInitialState(), players: newPlayersWithBolt, spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameStarted: true, canRoll: true, currentPlayerIndex: nextIdx, gameMessage: msg, turnStartTime: Date.now() };
+      
+      const finalPlayersForNextTurn = newPlayersWithBolt.map(p => ({ ...p, justResetFromBarrel: false }));
+
+      const boltState = { ...createInitialState(), players: finalPlayersForNextTurn, spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameStarted: true, canRoll: true, currentPlayerIndex: nextIdx, gameMessage: msg, turnStartTime: Date.now() };
       publishState(boltState, true);
       return;
     }
@@ -600,6 +607,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
             }
             updatedPlayer.scores.push(penalty);
             updatedPlayer.barrelBolts = 0; // Reset
+            updatedPlayer.justResetFromBarrel = true; // Установка флага иммунитета
         }
 
         const newPlayersWithBarrelBolt = state.players.map((p, i) => i === state.currentPlayerIndex ? updatedPlayer : p);
@@ -614,10 +622,12 @@ const Game = ({ roomCode, playerName, onExit }) => {
         } else if (nextPlayerStatus) {
             msg += ` Он(а) на бочке ${nextPlayerStatus}.`;
         }
+        
+        const finalPlayersForNextTurn = newPlayersWithBarrelBolt.map(p => ({ ...p, justResetFromBarrel: false }));
 
         const failBarrelState = { 
             ...createInitialState(), 
-            players: newPlayersWithBarrelBolt, 
+            players: finalPlayersForNextTurn, 
             spectators: state.spectators, 
             leavers: state.leavers, 
             hostId: state.hostId, 
@@ -679,11 +689,12 @@ const Game = ({ roomCode, playerName, onExit }) => {
             const wouldLandOnBarrel = 
                 (scoreAfterPenalty >= 200 && scoreAfterPenalty < 300) ||
                 (scoreAfterPenalty >= 700 && scoreAfterPenalty < 800);
-
-            if (!wouldLandOnBarrel) {
+            
+            // Проверяем флаг иммунитета у игрока, которого обгоняют
+            if (!wouldLandOnBarrel && !p.justResetFromBarrel) {
                 penaltyMessages.push(`${p.name} получает штраф -50.`);
                 penaltiesToAdd.push(-50);
-            } else {
+            } else if (wouldLandOnBarrel) {
                 penaltyMessages.push(`${p.name} избежал штрафа (-50), чтобы не попасть на бочку.`);
             }
         }
@@ -704,7 +715,8 @@ const Game = ({ roomCode, playerName, onExit }) => {
       if (penaltyMessages.length > 0) {
         winMessage += " " + penaltyMessages.join(" ");
       }
-      const winState = { ...createInitialState(), players: playersWithPenalties, spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameOver: true, gameMessage: winMessage };
+      const finalPlayersForNextTurn = playersWithPenalties.map(p => ({ ...p, justResetFromBarrel: false }));
+      const winState = { ...createInitialState(), players: finalPlayersForNextTurn, spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameOver: true, gameMessage: winMessage };
       publishState(winState, true);
       return;
     }
@@ -728,7 +740,8 @@ const Game = ({ roomCode, playerName, onExit }) => {
         bankMessage += ` Он(а) на бочке ${nextPlayerBarrelStatus}.`;
     }
 
-    const bankState = { ...createInitialState(), players: playersWithPenalties, spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameStarted: true, canRoll: true, currentPlayerIndex: nextPlayerIndex, gameMessage: bankMessage, turnStartTime: Date.now() };
+    const finalPlayersForNextTurn = playersWithPenalties.map(p => ({ ...p, justResetFromBarrel: false }));
+    const bankState = { ...createInitialState(), players: finalPlayersForNextTurn, spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameStarted: true, canRoll: true, currentPlayerIndex: nextPlayerIndex, gameMessage: bankMessage, turnStartTime: Date.now() };
     publishState(bankState, true);
   };
 
@@ -744,7 +757,10 @@ const Game = ({ roomCode, playerName, onExit }) => {
     const nextPlayer = newPlayers[nextIdx];
     let msg = `${currentPlayer.name} пропустил ход. Ход ${nextPlayer.name}.`;
     if(!nextPlayer.hasEnteredGame) msg += ` Ему нужно 50+ для входа.`;
-    publishState({ ...createInitialState(), players: newPlayers, spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameStarted: true, canRoll: true, currentPlayerIndex: nextIdx, gameMessage: msg, turnStartTime: Date.now() });
+    
+    const finalPlayersForNextTurn = newPlayers.map(p => ({ ...p, justResetFromBarrel: false }));
+
+    publishState({ ...createInitialState(), players: finalPlayersForNextTurn, spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameStarted: true, canRoll: true, currentPlayerIndex: nextIdx, gameMessage: msg, turnStartTime: Date.now() });
   }
 
   const handleNewGame = () => {
@@ -764,6 +780,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
                   sessionId: oldPlayer.sessionId,
                   hasEnteredGame: false,
                   barrelBolts: 0,
+                  justResetFromBarrel: false,
               };
           }
           
@@ -823,7 +840,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
 
             const newPlayers = newState.players.map((p, i) =>
                 i === joinIndex
-                ? { ...p, name: request.name, isClaimed: true, scores: initialScores, status: 'online', isSpectator: false, sessionId: request.sessionId, hasEnteredGame: restoredScore > 0, barrelBolts: 0 } // Восстанавливаем статус входа
+                ? { ...p, name: request.name, isClaimed: true, scores: initialScores, status: 'online', isSpectator: false, sessionId: request.sessionId, hasEnteredGame: restoredScore > 0, barrelBolts: 0, justResetFromBarrel: false } // Восстанавливаем статус входа
                 : p
             );
             newState = { ...newState, players: newPlayers, leavers: newLeavers, gameMessage: `${request.name} присоединился к игре.` };
@@ -901,7 +918,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
 
         const newPlayers = state.players.map((p, i) => {
             if (i === joinIndex) {
-                return { ...p, name: playerName, isClaimed: true, scores: initialScores, status: 'online', isSpectator: false, sessionId: mySessionIdRef.current, hasEnteredGame: restoredScore > 0, barrelBolts: 0 };
+                return { ...p, name: playerName, isClaimed: true, scores: initialScores, status: 'online', isSpectator: false, sessionId: mySessionIdRef.current, hasEnteredGame: restoredScore > 0, barrelBolts: 0, justResetFromBarrel: false };
             }
             return p;
         });
@@ -958,6 +975,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
             isSpectator: false,
             hasEnteredGame: false,
             barrelBolts: 0,
+            justResetFromBarrel: false,
         });
     }
 

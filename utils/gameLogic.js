@@ -131,6 +131,7 @@ export const createInitialState = () => {
         isSpectator: false,
         hasEnteredGame: false, // Для правила "входа в игру" (старт)
         barrelBolts: 0,
+        justResetFromBarrel: false, // Флаг для предотвращения двойного штрафа
     })),
     spectators: [],
     leavers: {}, // Track scores of players who left
