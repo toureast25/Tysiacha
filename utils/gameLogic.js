@@ -157,15 +157,17 @@ export const createInitialState = () => {
 };
 
 export const findNextHost = (players) => {
-    const candidates = players.filter(p => p.isClaimed && !p.isSpectator);
-    if (candidates.length === 0) return null; // No one left to be host
+    const candidates = players.filter(p => p.isClaimed && !p.isSpectator).sort((a, b) => a.id - b.id);
+    if (candidates.length === 0) return null;
 
-    // Only 'online' players can be host.
-    const onlinePlayers = candidates.filter(p => p.status === 'online').sort((a, b) => a.id - b.id);
-    if (onlinePlayers.length > 0) {
-        return onlinePlayers[0].id;
-    }
+    // Приоритет №1: Ищем 'online' игрока
+    const onlinePlayer = candidates.find(p => p.status === 'online');
+    if (onlinePlayer) return onlinePlayer.id;
     
-    // If no one is online, there is no host.
+    // Приоритет №2: Если нет 'online', ищем 'away' игрока
+    const awayPlayer = candidates.find(p => p.status === 'away');
+    if (awayPlayer) return awayPlayer.id;
+    
+    // Если нет никого онлайн или отошедших, хоста быть не может.
     return null;
 };

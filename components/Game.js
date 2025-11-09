@@ -200,21 +200,11 @@ const Game = ({ roomCode, playerName, onExit }) => {
                         setMyPlayerId(null);
                         setIsSpectator(true);
                     } else {
-                        const iWasInTheGameBefore = currentState ? (
-                            currentState.players.some(p => p.sessionId === mySessionIdRef.current) ||
-                            currentState.spectators.some(s => s.id === mySessionIdRef.current) ||
-                            currentState.joinRequests?.some(r => r.sessionId === mySessionIdRef.current)
-                        ) : (myPlayerId !== null || isSpectator);
-
-                        if (iWasInTheGameBefore) {
-                           // If I was in the game but am no longer, I was kicked or left. Exit to lobby.
-                           // Unless I am just waiting for approval.
-                           const isStillWaiting = finalState.joinRequests?.some(r => r.sessionId === mySessionIdRef.current);
-                           // FIX: Do not exit if the state that removed me was sent BY ME. This prevents a race condition on join/reconnect.
-                           if (!isStillWaiting && receivedState.senderId !== mySessionIdRef.current) {
-                               onExit();
-                           }
-                        }
+                        // Formerly, this block contained logic to automatically exit to the lobby
+                        // if the player was removed from the game state. This was found to be
+                        // the cause of a race condition on reconnect, leading to frequent reloads.
+                        // It has been removed to ensure stability. The user must now use the
+                        // "Leave Game" button to exit.
                     }
                     return finalState;
                 });
@@ -229,8 +219,8 @@ const Game = ({ roomCode, playerName, onExit }) => {
                 const localGameState = gameStateRef.current;
                 if (localGameState) {
                     const player = localGameState.players.find(p => p.id === playerId);
-                    // Если мы видим heartbeat от игрока, которого считали оффлайн, немедленно исправляем это.
-                    if (player && player.isClaimed && player.status === 'offline') {
+                    // Если мы видим heartbeat от игрока, которого не считали онлайн, немедленно исправляем это.
+                    if (player && player.isClaimed && player.status !== 'online') {
                         const newPlayers = localGameState.players.map(p => 
                             p.id === playerId ? { ...p, status: 'online' } : p
                         );
@@ -268,16 +258,11 @@ const Game = ({ roomCode, playerName, onExit }) => {
             needsUpdate = true;
         }
 
-        // --- Проверка на удаление неактивных игроков ---
-        updatedPlayers = updatedPlayers.map(p => {
-             const lastSeen = lastSeenTimestampsRef.current[p.id] || 0;
-            // Timeout check (10 minutes) - only remove if we've seen them before
-            if (now - lastSeen > 600000 && p.isClaimed && lastSeen > 0) {
-                needsUpdate = true;
-                return { ...p, isClaimed: false, status: 'offline' };
-            }
-            return p;
-        });
+        // --- Блок удаления неактивных игроков был убран ---
+        // Ранее здесь была логика, которая устанавливала isClaimed: false для игроков,
+        // неактивных более 10 минут. Это было причиной критической ошибки с состоянием
+        // при переподключении. Теперь эта логика удалена. `updateAllPlayerStatuses`
+        // корректно обрабатывает статусы 'away' и 'disconnected' без удаления игрока.
 
         if (needsUpdate) {
             let newState = { ...localGameState, players: updatedPlayers };
@@ -285,8 +270,14 @@ const Game = ({ roomCode, playerName, onExit }) => {
             let newHostId = localGameState.hostId;
             const currentHost = localGameState.hostId !== null ? updatedPlayers.find(p => p.id === localGameState.hostId) : null;
     
-            // Re-evaluate host if: there is no host, the current host is gone, or the current host is not 'online'.
-            if (localGameState.hostId === null || !currentHost || !currentHost.isClaimed || currentHost.isSpectator || currentHost.status !== 'online') {
+            // Пересматриваем хоста, если: хоста нет, текущий хост "пропал", или его статус хуже чем 'away'.
+            const isHostInvalid = localGameState.hostId === null || 
+                                  !currentHost || 
+                                  !currentHost.isClaimed || 
+                                  currentHost.isSpectator || 
+                                  (currentHost.status !== 'online' && currentHost.status !== 'away');
+
+            if (isHostInvalid) {
                 newHostId = findNextHost(updatedPlayers);
             }
             newState.hostId = newHostId;
@@ -1192,15 +1183,15 @@ const Game = ({ roomCode, playerName, onExit }) => {
     onSetIsScoreboardExpanded: setIsScoreboardExpanded,
     onSetIsDragOver: setIsDragOver,
     onRollDice: handleRollDice,
-    onBankScore: handleBankScore,
+    onBankScore: onBankScore,
     onSkipTurn: handleSkipTurn,
     onNewGame: handleNewGame,
     onStartOfficialGame: handleStartOfficialGame,
-    onJoinGame: handleJoinGame,
+    onJoinGame: onJoinGame,
     onJoinRequest: handleJoinRequest,
     onToggleDieSelection: handleToggleDieSelection,
     onDragStart: handleDragStart,
-    onDrop: handleDrop,
+    onDrop: onDrop,
     onDieDoubleClick: handleDieDoubleClick,
     onInitiateKick: handleInitiateKick,
     onConfirmKick: handleConfirmKick,
