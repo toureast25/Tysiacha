@@ -58,6 +58,35 @@ const Game = ({ roomCode, playerName, onExit }) => {
     }
   }, [myPlayerId, roomCode, playerName, isSpectator]);
 
+  const updateAllPlayerStatuses = React.useCallback((currentPlayers, lastSeenTimestamps) => {
+    const now = Date.now();
+    return currentPlayers.map(p => {
+        const playerCopy = {...p};
+        if (!playerCopy.isClaimed || playerCopy.isSpectator) {
+            return playerCopy;
+        }
+
+        const lastSeen = lastSeenTimestamps[playerCopy.id] || 0;
+        let newStatus = playerCopy.status;
+
+        if (lastSeen > 0) {
+            if (now - lastSeen > 60000) { // 1 min -> disconnected
+                newStatus = 'disconnected';
+            } else if (now - lastSeen > 10000) { // 10 sec -> away
+                newStatus = 'away';
+            } else {
+                newStatus = 'online';
+            }
+        } else if (playerCopy.status !== 'offline') {
+            // If we've never seen them but their status is not 'offline', correct it.
+            newStatus = 'offline';
+        }
+        
+        playerCopy.status = newStatus;
+        return playerCopy;
+    });
+  }, []);
+
   const publishState = React.useCallback((newState, isOptimisticUpdate = false) => {
     if (mqttClientRef.current && mqttClientRef.current.connected) {
       const currentVersion = gameStateRef.current?.version || 0;
@@ -306,7 +335,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
       clearInterval(statusCheckInterval);
       if (client) client.end();
     };
-  }, [roomCode, playerName, onExit]);
+  }, [roomCode, playerName, onExit, updateAllPlayerStatuses, publishState, findNextActivePlayer]);
 
 
   // --- Game Logic Actions ---
@@ -320,7 +349,8 @@ const Game = ({ roomCode, playerName, onExit }) => {
         return;
     }
     
-    const firstPlayer = state.players[state.currentPlayerIndex];
+    const playersWithFreshStatuses = updateAllPlayerStatuses(state.players, lastSeenTimestampsRef.current);
+    const firstPlayer = playersWithFreshStatuses[state.currentPlayerIndex];
     let gameMessage = `Игра началась! Ход ${firstPlayer.name}.`;
     if (!firstPlayer.hasEnteredGame) {
         gameMessage += ` Ему нужно 50+ для входа.`;
@@ -328,6 +358,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
 
     publishState({
         ...state,
+        players: playersWithFreshStatuses,
         isGameStarted: true,
         canRoll: true,
         gameMessage: gameMessage,
@@ -374,15 +405,17 @@ const Game = ({ roomCode, playerName, onExit }) => {
       const newPlayers = state.players.map((player, index) =>
         index === state.currentPlayerIndex ? updatedPlayer : player
       );
-      const nextPlayerIndex = findNextActivePlayer(state.currentPlayerIndex, newPlayers);
-      const nextPlayer = newPlayers[nextPlayerIndex];
+      
+      const playersWithFreshStatuses = updateAllPlayerStatuses(newPlayers, lastSeenTimestampsRef.current);
+      const nextPlayerIndex = findNextActivePlayer(state.currentPlayerIndex, playersWithFreshStatuses);
+      const nextPlayer = playersWithFreshStatuses[nextPlayerIndex];
 
       let gameMessage = `${state.players[state.currentPlayerIndex].name} получает болт! Ход ${nextPlayer.name}.`;
       if (!nextPlayer.hasEnteredGame) {
         gameMessage += ` Ему нужно 50+ для входа.`;
       }
       
-      const finalPlayersForNextTurn = newPlayers.map(p => ({ ...p, justResetFromBarrel: false }));
+      const finalPlayersForNextTurn = playersWithFreshStatuses.map(p => ({ ...p, justResetFromBarrel: false }));
 
       const boltState = {
         ...createInitialState(),
@@ -542,12 +575,13 @@ const Game = ({ roomCode, playerName, onExit }) => {
         }
       }
       const newPlayersWithBolt = state.players.map((p, i) => i === state.currentPlayerIndex ? updatedPlayer : p);
-      const nextIdx = findNextActivePlayer(state.currentPlayerIndex, newPlayersWithBolt);
-      const nextPlayer = newPlayersWithBolt[nextIdx];
+      const playersWithFreshStatuses = updateAllPlayerStatuses(newPlayersWithBolt, lastSeenTimestampsRef.current);
+      const nextIdx = findNextActivePlayer(state.currentPlayerIndex, playersWithFreshStatuses);
+      const nextPlayer = playersWithFreshStatuses[nextIdx];
       let msg = `${currentPlayer.name} получает болт. Ход ${nextPlayer.name}.`;
       if (!nextPlayer.hasEnteredGame) msg += ` Ему нужно 50+ для входа.`;
       
-      const finalPlayersForNextTurn = newPlayersWithBolt.map(p => ({ ...p, justResetFromBarrel: false }));
+      const finalPlayersForNextTurn = playersWithFreshStatuses.map(p => ({ ...p, justResetFromBarrel: false }));
 
       const boltState = { ...createInitialState(), players: finalPlayersForNextTurn, spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameStarted: true, canRoll: true, currentPlayerIndex: nextIdx, gameMessage: msg, turnStartTime: Date.now() };
       publishState(boltState, true);
@@ -556,14 +590,15 @@ const Game = ({ roomCode, playerName, onExit }) => {
 
     // "Старт" - проверка входа в игру
     if (!currentPlayer.hasEnteredGame && finalTurnScore < 50) {
-        const nextPlayerIndex = findNextActivePlayer(state.currentPlayerIndex, state.players);
-        const nextPlayer = state.players[nextPlayerIndex];
+        const playersWithFreshStatuses = updateAllPlayerStatuses(state.players, lastSeenTimestampsRef.current);
+        const nextPlayerIndex = findNextActivePlayer(state.currentPlayerIndex, playersWithFreshStatuses);
+        const nextPlayer = playersWithFreshStatuses[nextPlayerIndex];
         let msg = `${currentPlayer.name} не набрал(а) 50 очков для входа. Ход ${nextPlayer.name}.`;
         if (!nextPlayer.hasEnteredGame) msg += ` Ему нужно 50+ для входа.`;
 
         const failEntryState = { 
             ...createInitialState(), 
-            players: state.players, 
+            players: playersWithFreshStatuses, 
             spectators: state.spectators, 
             leavers: state.leavers, 
             hostId: state.hostId, 
@@ -611,9 +646,10 @@ const Game = ({ roomCode, playerName, onExit }) => {
         }
 
         const newPlayersWithBarrelBolt = state.players.map((p, i) => i === state.currentPlayerIndex ? updatedPlayer : p);
+        const playersWithFreshStatuses = updateAllPlayerStatuses(newPlayersWithBarrelBolt, lastSeenTimestampsRef.current);
 
-        const nextPlayerIndex = findNextActivePlayer(state.currentPlayerIndex, newPlayersWithBarrelBolt);
-        const nextPlayer = newPlayersWithBarrelBolt[nextPlayerIndex];
+        const nextPlayerIndex = findNextActivePlayer(state.currentPlayerIndex, playersWithFreshStatuses);
+        const nextPlayer = playersWithFreshStatuses[nextPlayerIndex];
         let msg = `${currentPlayer.name} не смог(ла) сойти с бочки. Очки сгорели. Ход ${nextPlayer.name}.`;
         
         const nextPlayerStatus = getPlayerBarrelStatus(nextPlayer);
@@ -623,7 +659,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
             msg += ` Он(а) на бочке ${nextPlayerStatus}.`;
         }
         
-        const finalPlayersForNextTurn = newPlayersWithBarrelBolt.map(p => ({ ...p, justResetFromBarrel: false }));
+        const finalPlayersForNextTurn = playersWithFreshStatuses.map(p => ({ ...p, justResetFromBarrel: false }));
 
         const failBarrelState = { 
             ...createInitialState(), 
@@ -715,15 +751,17 @@ const Game = ({ roomCode, playerName, onExit }) => {
       if (penaltyMessages.length > 0) {
         winMessage += " " + penaltyMessages.join(" ");
       }
-      const finalPlayersForNextTurn = playersWithPenalties.map(p => ({ ...p, justResetFromBarrel: false }));
+      const playersWithFreshStatuses = updateAllPlayerStatuses(playersWithPenalties, lastSeenTimestampsRef.current);
+      const finalPlayersForNextTurn = playersWithFreshStatuses.map(p => ({ ...p, justResetFromBarrel: false }));
       const winState = { ...createInitialState(), players: finalPlayersForNextTurn, spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameOver: true, gameMessage: winMessage };
       publishState(winState, true);
       return;
     }
 
     // 4. Готовим следующий ход
-    const nextPlayerIndex = findNextActivePlayer(state.currentPlayerIndex, playersWithPenalties);
-    const nextPlayer = playersWithPenalties[nextPlayerIndex];
+    const playersWithFreshStatuses = updateAllPlayerStatuses(playersWithPenalties, lastSeenTimestampsRef.current);
+    const nextPlayerIndex = findNextActivePlayer(state.currentPlayerIndex, playersWithFreshStatuses);
+    const nextPlayer = playersWithFreshStatuses[nextPlayerIndex];
 
     let bankMessage = !currentPlayer.hasEnteredGame
         ? `${currentPlayer.name} вошёл в игру, записав ${finalTurnScore}! Ход ${nextPlayer.name}.`
@@ -740,7 +778,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
         bankMessage += ` Он(а) на бочке ${nextPlayerBarrelStatus}.`;
     }
 
-    const finalPlayersForNextTurn = playersWithPenalties.map(p => ({ ...p, justResetFromBarrel: false }));
+    const finalPlayersForNextTurn = playersWithFreshStatuses.map(p => ({ ...p, justResetFromBarrel: false }));
     const bankState = { ...createInitialState(), players: finalPlayersForNextTurn, spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameStarted: true, canRoll: true, currentPlayerIndex: nextPlayerIndex, gameMessage: bankMessage, turnStartTime: Date.now() };
     publishState(bankState, true);
   };
@@ -753,12 +791,13 @@ const Game = ({ roomCode, playerName, onExit }) => {
     if(currentPlayer.status === 'online') return;
 
     const newPlayers = state.players.map((p, i) => i === state.currentPlayerIndex ? { ...p, scores: [...p.scores, '/'] } : p);
-    const nextIdx = findNextActivePlayer(state.currentPlayerIndex, newPlayers);
-    const nextPlayer = newPlayers[nextIdx];
+    const playersWithFreshStatuses = updateAllPlayerStatuses(newPlayers, lastSeenTimestampsRef.current);
+    const nextIdx = findNextActivePlayer(state.currentPlayerIndex, playersWithFreshStatuses);
+    const nextPlayer = playersWithFreshStatuses[nextIdx];
     let msg = `${currentPlayer.name} пропустил ход. Ход ${nextPlayer.name}.`;
     if(!nextPlayer.hasEnteredGame) msg += ` Ему нужно 50+ для входа.`;
     
-    const finalPlayersForNextTurn = newPlayers.map(p => ({ ...p, justResetFromBarrel: false }));
+    const finalPlayersForNextTurn = playersWithFreshStatuses.map(p => ({ ...p, justResetFromBarrel: false }));
 
     publishState({ ...createInitialState(), players: finalPlayersForNextTurn, spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameStarted: true, canRoll: true, currentPlayerIndex: nextIdx, gameMessage: msg, turnStartTime: Date.now() });
   }
@@ -792,8 +831,9 @@ const Game = ({ roomCode, playerName, onExit }) => {
           };
       });
 
-      const hostPlayer = newPlayers.find(p => p.id === oldState.hostId);
-      const claimedPlayerCount = newPlayers.filter(p => p.isClaimed && !p.isSpectator).length;
+      const playersWithFreshStatuses = updateAllPlayerStatuses(newPlayers, lastSeenTimestampsRef.current);
+      const hostPlayer = playersWithFreshStatuses.find(p => p.id === oldState.hostId);
+      const claimedPlayerCount = playersWithFreshStatuses.filter(p => p.isClaimed && !p.isSpectator).length;
       
       let gameMessage;
       if (claimedPlayerCount < 2) {
@@ -804,7 +844,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
 
       const finalState = {
           ...createInitialState(), 
-          players: newPlayers, 
+          players: playersWithFreshStatuses, 
           spectators: oldState.spectators, 
           hostId: oldState.hostId,
           currentPlayerIndex: oldState.hostId,
@@ -843,7 +883,8 @@ const Game = ({ roomCode, playerName, onExit }) => {
                 ? { ...p, name: request.name, isClaimed: true, scores: initialScores, status: 'online', isSpectator: false, sessionId: request.sessionId, hasEnteredGame: restoredScore > 0, barrelBolts: 0, justResetFromBarrel: false } // Восстанавливаем статус входа
                 : p
             );
-            newState = { ...newState, players: newPlayers, leavers: newLeavers, gameMessage: `${request.name} присоединился к игре.` };
+            const playersWithFreshStatuses = updateAllPlayerStatuses(newPlayers, lastSeenTimestampsRef.current);
+            newState = { ...newState, players: playersWithFreshStatuses, leavers: newLeavers, gameMessage: `${request.name} присоединился к игре.` };
         } else {
             const newSpectator = { name: request.name, id: request.sessionId };
             newState = { ...newState, spectators: [...newState.spectators, newSpectator], gameMessage: `Для ${request.name} не нашлось места, он стал зрителем.` };
@@ -853,7 +894,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
         newState = { ...newState, spectators: [...(newState.spectators || []), newSpectator], gameMessage: `Хост отклонил запрос ${request.name} на присоединение.` };
     }
     publishState(newState);
-  }, [myPlayerId, publishState]);
+  }, [myPlayerId, publishState, updateAllPlayerStatuses]);
 
   React.useEffect(() => {
       const isHost = myPlayerId === gameState?.hostId;
@@ -880,7 +921,8 @@ const Game = ({ roomCode, playerName, onExit }) => {
     if (availableSlots === 0) {
       if (window.confirm("Нет свободных мест. Хотите присоединиться в качестве зрителя?")) {
         const newSpectator = { name: playerName, id: mySessionIdRef.current };
-        publishState({ ...state, spectators: [...state.spectators, newSpectator] });
+        const playersWithFreshStatuses = updateAllPlayerStatuses(state.players, lastSeenTimestampsRef.current);
+        publishState({ ...state, players: playersWithFreshStatuses, spectators: [...state.spectators, newSpectator] });
         setIsSpectator(true);
       }
       return;
@@ -894,8 +936,10 @@ const Game = ({ roomCode, playerName, onExit }) => {
             sessionId: mySessionIdRef.current,
             timestamp: Date.now()
         };
+        const playersWithFreshStatuses = updateAllPlayerStatuses(state.players, lastSeenTimestampsRef.current);
         const newState = {
             ...state,
+            players: playersWithFreshStatuses,
             joinRequests: [...(state.joinRequests || []), newRequest],
             gameMessage: `${playerName} хочет присоединиться. Ожидание подтверждения от хоста.`
         };
@@ -923,12 +967,14 @@ const Game = ({ roomCode, playerName, onExit }) => {
             return p;
         });
 
+        const playersWithFreshStatuses = updateAllPlayerStatuses(newPlayers, lastSeenTimestampsRef.current);
+
         let newHostId = state.hostId;
-        if (state.hostId === null || !newPlayers.some(p => p.id === state.hostId && p.isClaimed)) {
-            newHostId = findNextHost(newPlayers) ?? joinIndex;
+        if (state.hostId === null || !playersWithFreshStatuses.some(p => p.id === state.hostId && p.isClaimed)) {
+            newHostId = findNextHost(playersWithFreshStatuses) ?? joinIndex;
         }
 
-        const claimedPlayerCount = newPlayers.filter(p => p.isClaimed && !p.isSpectator).length;
+        const claimedPlayerCount = playersWithFreshStatuses.filter(p => p.isClaimed && !p.isSpectator).length;
 
         let gameMessage = state.gameMessage;
 
@@ -938,10 +984,10 @@ const Game = ({ roomCode, playerName, onExit }) => {
             gameMessage = `Готовы к игре! Хост может начинать.`;
         } else {
             const scoreMessage = restoredScore > 0 ? ` (восстановлено ${restoredScore} очков)` : '';
-            gameMessage = `${playerName} присоединился${scoreMessage}. Ход ${newPlayers[state.currentPlayerIndex].name}.`;
+            gameMessage = `${playerName} присоединился${scoreMessage}. Ход ${playersWithFreshStatuses[state.currentPlayerIndex].name}.`;
         }
 
-        publishState({ ...state, players: newPlayers, leavers: newLeavers, gameMessage, hostId: newHostId }, true);
+        publishState({ ...state, players: playersWithFreshStatuses, leavers: newLeavers, gameMessage, hostId: newHostId }, true);
     }
   };
   
@@ -959,9 +1005,12 @@ const Game = ({ roomCode, playerName, onExit }) => {
       : { ...state.leavers };
 
     // 2. Create new player list: active players who are staying, re-indexed from 0
-    let newPlayers = state.players
+    let newPlayersUnordered = state.players
       .filter(p => p.isClaimed && p.id !== playerIdToRemove)
-      .map((p, index) => ({ ...p, id: index }));
+      
+    // Re-index players from 0
+    let newPlayers = newPlayersUnordered.map((p, index) => ({ ...p, id: index }));
+
 
     // 3. Pad with empty slots until the list has 5 players
     while (newPlayers.length < 5) {
@@ -980,7 +1029,8 @@ const Game = ({ roomCode, playerName, onExit }) => {
     }
 
     // 4. Find new host
-    const newHostId = findNextHost(newPlayers);
+    const playersWithFreshStatuses = updateAllPlayerStatuses(newPlayers, lastSeenTimestampsRef.current);
+    const newHostId = findNextHost(playersWithFreshStatuses);
     
     // 5. Determine next current player
     let newCurrentPlayerIndex = 0;
@@ -989,16 +1039,16 @@ const Game = ({ roomCode, playerName, onExit }) => {
     
     if (gameWasInProgress) {
         if (oldCurrentPlayer.id === playerIdToRemove) { // It was the removed player's turn
-            newCurrentPlayerIndex = findNextActivePlayer(-1, newPlayers); 
+            newCurrentPlayerIndex = findNextActivePlayer(-1, playersWithFreshStatuses); 
         } else {
-            const currentPlayerInNewList = newPlayers.find(p => p.sessionId === oldCurrentPlayer.sessionId);
-            newCurrentPlayerIndex = currentPlayerInNewList ? currentPlayerInNewList.id : findNextActivePlayer(-1, newPlayers);
+            const currentPlayerInNewList = playersWithFreshStatuses.find(p => p.sessionId === oldCurrentPlayer.sessionId);
+            newCurrentPlayerIndex = currentPlayerInNewList ? currentPlayerInNewList.id : findNextActivePlayer(-1, playersWithFreshStatuses);
         }
     } else {
-        newCurrentPlayerIndex = state.hostId !== null && newPlayers.some(p => p.id === state.hostId) ? state.hostId : 0;
+        newCurrentPlayerIndex = newHostId !== null ? newHostId : 0;
     }
 
-    const remainingActivePlayers = newPlayers.filter(p => p.isClaimed && !p.isSpectator);
+    const remainingActivePlayers = playersWithFreshStatuses.filter(p => p.isClaimed && !p.isSpectator);
     const activePlayersBeforeRemoval = state.players.filter(p => p.isClaimed && !p.isSpectator).length;
     
     let finalState;
@@ -1006,7 +1056,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
     if (gameWasInProgress && remainingActivePlayers.length < 2 && activePlayersBeforeRemoval >= 2) {
         finalState = {
             ...state,
-            players: newPlayers,
+            players: playersWithFreshStatuses,
             hostId: newHostId,
             leavers: newLeavers,
             isGameOver: true,
@@ -1015,7 +1065,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
               : 'Все игроки вышли. Игра окончена.',
         };
     } else {
-        const nextPlayer = newPlayers[newCurrentPlayerIndex];
+        const nextPlayer = playersWithFreshStatuses[newCurrentPlayerIndex];
         const nextPlayerName = nextPlayer ? nextPlayer.name : '';
         
         let message = wasKicked
@@ -1028,7 +1078,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
 
         finalState = {
           ...state,
-          players: newPlayers,
+          players: playersWithFreshStatuses,
           hostId: newHostId,
           leavers: newLeavers,
           currentPlayerIndex: newCurrentPlayerIndex,
