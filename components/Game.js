@@ -194,6 +194,20 @@ const Game = ({ roomCode, playerName, onExit }) => {
              try {
                 const { playerId } = JSON.parse(message.toString());
                 lastSeenTimestampsRef.current[playerId] = Date.now();
+
+                // --- НОВОЕ: Мгновенное обновление статуса по heartbeat ---
+                const localGameState = gameStateRef.current;
+                if (localGameState) {
+                    const player = localGameState.players.find(p => p.id === playerId);
+                    // Если мы видим heartbeat от игрока, которого считали оффлайн, немедленно исправляем это.
+                    if (player && player.isClaimed && player.status === 'offline') {
+                        const newPlayers = localGameState.players.map(p => 
+                            p.id === playerId ? { ...p, status: 'online' } : p
+                        );
+                        // Публикуем небольшое, целевое обновление.
+                        publishState({ ...localGameState, players: newPlayers });
+                    }
+                }
             } catch (e) { /* ignore parse error */ }
         }
     });
