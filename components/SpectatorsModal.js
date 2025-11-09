@@ -1,3 +1,4 @@
+
 // 
 import React from 'react';
 
@@ -18,7 +19,7 @@ const SpectatorsModal = ({ spectators, onClose }) => {
       },
       React.createElement(
         'header',
-        { className: "flex items-center justify-between p-4 border-b border-slate-700 flex-shrink-0" },
+        { className: "flex items-center justify-between p-3 sm:p-4 border-b border-slate-700 flex-shrink-0" },
         React.createElement('h2', { className: "font-ruslan text-3xl text-yellow-300" }, `Зрители (${spectators.length})`),
         React.createElement(
           'button',
@@ -36,7 +37,7 @@ const SpectatorsModal = ({ spectators, onClose }) => {
       ),
       React.createElement(
         'main',
-        { className: "p-6 overflow-y-auto max-h-[60vh]" },
+        { className: "p-4 sm:p-6 overflow-y-auto max-h-[60vh]" },
         spectators.length > 0
           ? React.createElement('ul', { className: "space-y-2" },
               spectators.map((spectator, index) =>

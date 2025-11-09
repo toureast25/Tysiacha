@@ -1,3 +1,4 @@
+
 // 
 import React from 'react';
 
@@ -18,7 +19,7 @@ const RulesModal = ({ onClose }) => {
       },
       React.createElement(
         'header',
-        { className: "flex items-center justify-between p-4 border-b border-slate-700 flex-shrink-0" },
+        { className: "flex items-center justify-between p-3 sm:p-4 border-b border-slate-700 flex-shrink-0" },
         React.createElement('h2', { className: "font-ruslan text-3xl text-yellow-300" }, 'Правила Игры "Тысяча"'),
         React.createElement(
           'button',
@@ -36,7 +37,7 @@ const RulesModal = ({ onClose }) => {
       ),
       React.createElement(
         'main',
-        { className: "p-6 overflow-y-auto space-y-6" },
+        { className: "p-4 sm:p-6 overflow-y-auto space-y-4 sm:space-y-6" },
         React.createElement(
           'section',
           null,
@@ -73,7 +74,7 @@ const RulesModal = ({ onClose }) => {
           React.createElement('p', { className: "mb-2 italic text-gray-400" }, 'Важно: Комбинация засчитывается, только если все её кости выпали в одном броске.'),
           React.createElement(
             'div',
-            { className: "grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4" },
+            { className: "grid grid-cols-1 md:grid-cols-2 gap-x-4 sm:gap-x-8 gap-y-3 sm:gap-y-4" },
             React.createElement(
               'div',
               null,
@@ -128,7 +129,7 @@ const RulesModal = ({ onClose }) => {
           React.createElement('h3', { className: "text-xl font-bold text-yellow-400 mb-2" }, '4. Особые ситуации и Штрафы'),
           React.createElement(
             'dl',
-            { className: "space-y-4" },
+            { className: "space-y-3 sm:space-y-4" },
             React.createElement('div', null,
                 React.createElement('dt', { className: "font-semibold text-lg text-white" }, 'Вход в игру ("открытие" счёта)'),
                 React.createElement(
