@@ -1,4 +1,5 @@
 
+
 // 
 import React from 'react';
 
@@ -37,7 +38,7 @@ const RulesModal = ({ onClose }) => {
       ),
       React.createElement(
         'main',
-        { className: "p-4 sm:p-6 overflow-y-auto space-y-4 sm:space-y-6" },
+        { className: "p-4 sm:p-6 overflow-y-auto space-y-4 sm:space-y-6 custom-scrollbar" },
         React.createElement(
           'section',
           null,

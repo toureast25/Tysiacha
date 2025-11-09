@@ -1,4 +1,5 @@
 
+
 // 
 import React from 'react';
 
@@ -37,7 +38,7 @@ const SpectatorsModal = ({ spectators, onClose }) => {
       ),
       React.createElement(
         'main',
-        { className: "p-4 sm:p-6 overflow-y-auto max-h-[60vh]" },
+        { className: "p-4 sm:p-6 overflow-y-auto max-h-[60vh] custom-scrollbar" },
         spectators.length > 0
           ? React.createElement('ul', { className: "space-y-2" },
               spectators.map((spectator, index) =>

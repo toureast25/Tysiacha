@@ -136,7 +136,7 @@ const App = () => {
   return React.createElement(
     'main',
     {
-      className: "w-screen h-screen bg-cover bg-center bg-no-repeat text-white",
+      className: "w-full h-full bg-cover bg-center bg-no-repeat text-white",
       style: { backgroundImage: "url('https://images.unsplash.com/photo-1585501374353-8199cf8e1324?q=80&w=1920&auto=format&fit=crop')" }
     },
     React.createElement(
