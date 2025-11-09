@@ -3,6 +3,8 @@ import React from 'react';
 import { calculateTotalScore, getPlayerBarrelStatus } from '../utils/gameLogic.js';
 import RulesModal from './RulesModal.js';
 import SpectatorsModal from './SpectatorsModal.js';
+import KickConfirmModal from './KickConfirmModal.js';
+import PlayerContextMenu from './PlayerContextMenu.js';
 import { DiceIcon, SmallDiceIcon } from './Dice.js';
 
 const PlayerStatus = ({ player }) => {
@@ -64,6 +66,7 @@ const GameUI = (props) => {
         claimedPlayerCount,
         availableSlotsForJoin,
         currentPlayer,
+        kickConfirmState,
         onLeaveGame,
         onSetShowRules,
         onSetIsSpectatorsModalOpen,
@@ -80,13 +83,48 @@ const GameUI = (props) => {
         onDragStart,
         onDrop,
         onDieDoubleClick,
+        onInitiateKick,
+        onConfirmKick,
+        onCancelKick,
     } = props;
+
+    const [contextMenu, setContextMenu] = React.useState({
+        isOpen: false,
+        player: null,
+        x: 0,
+        y: 0,
+    });
+
+    const handlePlayerHeaderClick = (event, player) => {
+        event.preventDefault();
+        setContextMenu({
+            isOpen: true,
+            player: player,
+            x: event.clientX,
+            y: event.clientY,
+        });
+    };
+
+    const handleContextMenuAction = (action, player) => {
+        setContextMenu({ isOpen: false, player: null, x: 0, y: 0 }); // Close menu first
+        if (action === 'kick') {
+            onInitiateKick(player);
+        }
+    };
+
 
     return React.createElement(
         React.Fragment,
         null,
         showRules && React.createElement(RulesModal, { onClose: () => onSetShowRules(false) }),
         isSpectatorsModalOpen && React.createElement(SpectatorsModal, { spectators: gameState.spectators, onClose: () => onSetIsSpectatorsModalOpen(false) }),
+        kickConfirmState.isOpen && React.createElement(KickConfirmModal, { playerToKick: kickConfirmState.player, onConfirm: onConfirmKick, onCancel: onCancelKick }),
+        contextMenu.isOpen && React.createElement(PlayerContextMenu, {
+            player: contextMenu.player,
+            position: { x: contextMenu.x, y: contextMenu.y },
+            onClose: () => setContextMenu({ isOpen: false, player: null, x: 0, y: 0 }),
+            onAction: handleContextMenuAction,
+        }),
         React.createElement(
           'div', { className: "w-full h-full flex flex-col p-2 sm:p-4 text-white overflow-hidden" },
           React.createElement('header', { className: "flex justify-between items-center mb-2 sm:mb-4 flex-shrink-0" },
@@ -126,11 +164,20 @@ const GameUI = (props) => {
                         const isUnclaimedAndEmpty = !player.isClaimed && player.name === `Игрок ${player.id + 1}`;
                         const barrelStatus = getPlayerBarrelStatus(player);
                         const isHostPlayer = player.id === gameState.hostId;
+                        const isKickable = isHost && player.isClaimed && player.id !== myPlayerId;
                 
+                        let headerClasses = `h-14 sm:h-16 px-0 py-0 text-center align-middle transition-all duration-300 relative border-r border-slate-600 last:border-r-0 ${index === gameState.currentPlayerIndex && gameState.isGameStarted && !gameState.isGameOver && player.isClaimed ? 'bg-yellow-400 text-slate-900' : 'bg-slate-700/50'}`;
+                        if (isKickable) {
+                            headerClasses += ' cursor-pointer hover:bg-red-800/60';
+                        }
+                        
                         return React.createElement('th', { 
                             key: `player-header-${player.id}`, 
                             scope: "col", 
-                            className: `h-14 sm:h-16 px-0 py-0 text-center align-middle transition-all duration-300 relative border-r border-slate-600 last:border-r-0 ${index === gameState.currentPlayerIndex && gameState.isGameStarted && !gameState.isGameOver && player.isClaimed ? 'bg-yellow-400 text-slate-900' : 'bg-slate-700/50'}` 
+                            className: headerClasses,
+                            onClick: isKickable ? (e) => handlePlayerHeaderClick(e, player) : undefined,
+                            onContextMenu: isKickable ? (e) => handlePlayerHeaderClick(e, player) : undefined,
+                            title: isKickable ? `Действия для игрока ${player.name}` : ''
                         },
                           isUnclaimedAndEmpty
                             ? React.createElement('div', { className: "flex flex-col items-center justify-center h-full py-2 text-gray-500" },
@@ -235,15 +282,7 @@ const GameUI = (props) => {
                   )
                 )
               ),
-              // --- РАССТОЯНИЕ МЕЖДУ КУБИКАМИ И ОЧКАМИ ---
-              // Вертикальные отступы этого контейнера (классы pt-*, pb-*)
-              // определяют пространство СВЕРХУ и СНИЗУ от игровых костей.
-              // Класс `pb-4` (padding-bottom: 1rem) и `sm:pb-6` (1.5rem для экранов sm и больше)
-              // создают расстояние до блока "Очки за ход", который находится ниже.
               React.createElement('div', { className: "flex-grow w-full flex flex-col items-center justify-center pt-2 pb-2 sm:pt-3 sm:pb-6 px-0 sm:px-4" },
-                // --- ОТСТУПЫ МЕЖДУ КУБИКАМИ ---
-                // Класс justify-between распределяет кости по горизонтали, прижимая крайние к границам
-                // и создавая равные отступы только между ними.
                 React.createElement('div', { className: "w-full sm:max-w-[480px] flex items-center justify-between min-h-[72px] sm:min-h-[80px]" },
                   gameState.diceOnBoard.map((value, i) => React.createElement(DiceIcon, { key: `board-${i}`, value: value, isSelected: gameState.selectedDiceIndices.includes(i), onClick: isMyTurn ? () => onToggleDieSelection(i) : null, onDragStart: isMyTurn ? (e) => onDragStart(e, i) : null, onDoubleClick: isMyTurn ? () => onDieDoubleClick(i) : null })),
                   Array.from({ length: 5 - gameState.diceOnBoard.length }).map((_, i) => React.createElement(DiceIcon, { key: `placeholder-${i}`, value: 0 }))

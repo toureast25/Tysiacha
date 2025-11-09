@@ -1,4 +1,3 @@
-
 // 
 // Service Worker для кэширования ресурсов PWA
 
@@ -14,9 +13,12 @@ const urlsToCache = [
   '/components/App.js',
   '/components/Dice.js',
   '/components/Game.js',
+  '/components/GameUI.js',
   '/components/Lobby.js',
   '/components/RulesModal.js',
   '/components/SpectatorsModal.js',
+  '/components/KickConfirmModal.js',
+  '/components/PlayerContextMenu.js',
   'https://cdn.tailwindcss.com',
   'https://fonts.googleapis.com/css2?family=Roboto+Condensed:ital,wght@0,100..900;1,100..900&family=Ruslan+Display&display=swap',
   'https://unpkg.com/mqtt/dist/mqtt.min.js',

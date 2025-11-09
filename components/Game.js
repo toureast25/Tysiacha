@@ -3,6 +3,7 @@ import React from 'react';
 import { MQTT_BROKER_URL, MQTT_TOPIC_PREFIX } from '../constants.js';
 import { analyzeDice, validateSelection, calculateTotalScore, createInitialState, findNextHost, getPlayerBarrelStatus } from '../utils/gameLogic.js';
 import GameUI from './GameUI.js';
+import KickConfirmModal from './KickConfirmModal.js';
 
 const Game = ({ roomCode, playerName, onExit }) => {
   const [gameState, setGameState] = React.useState(null);
@@ -13,6 +14,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
   const [isSpectatorsModalOpen, setIsSpectatorsModalOpen] = React.useState(false);
   const [showRules, setShowRules] = React.useState(false);
   const [isDragOver, setIsDragOver] = React.useState(false);
+  const [kickConfirmState, setKickConfirmState] = React.useState({ isOpen: false, player: null });
   
   const mqttClientRef = React.useRef(null);
   const isStateReceivedRef = React.useRef(false);
@@ -892,39 +894,23 @@ const Game = ({ roomCode, playerName, onExit }) => {
         publishState({ ...state, players: newPlayers, leavers: newLeavers, gameMessage, hostId: newHostId }, true);
     }
   };
-
-
-  const handleLeaveGame = () => {
-    if (isSpectator) {
-      const state = gameStateRef.current;
-      if(state) {
-          const newSpectators = state.spectators.filter(s => s.id !== mySessionIdRef.current);
-          publishState({...state, spectators: newSpectators});
-      }
-      onExit();
-      return;
-    }
-
-    if (myPlayerId === null) {
-      onExit();
-      return;
-    }
-      
+  
+  const handlePlayerRemoval = (playerIdToRemove, wasKicked = false) => {
     const state = gameStateRef.current;
-    if(!state) return onExit();
+    if (!state) return;
 
-    const me = state.players.find(p => p.id === myPlayerId);
-    if (!me) return onExit();
+    const playerToRemove = state.players.find(p => p.id === playerIdToRemove);
+    if (!playerToRemove || !playerToRemove.isClaimed) return;
 
-    // 1. Save score to leavers object
-    const totalScore = calculateTotalScore(me);
-    const newLeavers = (totalScore > 0) 
-      ? { ...state.leavers, [me.name]: totalScore }
+    // 1. Save score to leavers object unless kicked
+    const totalScore = calculateTotalScore(playerToRemove);
+    const newLeavers = !wasKicked && totalScore > 0
+      ? { ...state.leavers, [playerToRemove.name]: totalScore }
       : { ...state.leavers };
 
     // 2. Create new player list: active players who are staying, re-indexed from 0
     let newPlayers = state.players
-      .filter(p => p.isClaimed && p.id !== myPlayerId)
+      .filter(p => p.isClaimed && p.id !== playerIdToRemove)
       .map((p, index) => ({ ...p, id: index }));
 
     // 3. Pad with empty slots until the list has 5 players
@@ -951,11 +937,9 @@ const Game = ({ roomCode, playerName, onExit }) => {
     const oldCurrentPlayer = state.players[state.currentPlayerIndex];
     
     if (gameWasInProgress) {
-        if (oldCurrentPlayer.id === myPlayerId) { // It was my turn
-            // The turn passes to the next available player, starting search from the beginning
+        if (oldCurrentPlayer.id === playerIdToRemove) { // It was the removed player's turn
             newCurrentPlayerIndex = findNextActivePlayer(-1, newPlayers); 
         } else {
-            // Find the same current player in the new list
             const currentPlayerInNewList = newPlayers.find(p => p.sessionId === oldCurrentPlayer.sessionId);
             newCurrentPlayerIndex = currentPlayerInNewList ? currentPlayerInNewList.id : findNextActivePlayer(-1, newPlayers);
         }
@@ -964,11 +948,11 @@ const Game = ({ roomCode, playerName, onExit }) => {
     }
 
     const remainingActivePlayers = newPlayers.filter(p => p.isClaimed && !p.isSpectator);
-    const activePlayersBeforeLeave = state.players.filter(p => p.isClaimed && !p.isSpectator).length;
+    const activePlayersBeforeRemoval = state.players.filter(p => p.isClaimed && !p.isSpectator).length;
     
     let finalState;
     // 6. Check for auto-win condition
-    if (gameWasInProgress && remainingActivePlayers.length < 2 && activePlayersBeforeLeave >= 2) {
+    if (gameWasInProgress && remainingActivePlayers.length < 2 && activePlayersBeforeRemoval >= 2) {
         finalState = {
             ...state,
             players: newPlayers,
@@ -983,8 +967,11 @@ const Game = ({ roomCode, playerName, onExit }) => {
         const nextPlayer = newPlayers[newCurrentPlayerIndex];
         const nextPlayerName = nextPlayer ? nextPlayer.name : '';
         
-        let message = `${me.name} покинул(а) игру.`;
-        if (gameWasInProgress && nextPlayerName && oldCurrentPlayer.id === myPlayerId) {
+        let message = wasKicked
+            ? `${playerToRemove.name} был(а) исключен(а) хостом.`
+            : `${playerToRemove.name} покинул(а) игру.`;
+
+        if (gameWasInProgress && nextPlayerName && oldCurrentPlayer.id === playerIdToRemove) {
             message += ` Ход ${nextPlayerName}.`;
         }
 
@@ -997,8 +984,8 @@ const Game = ({ roomCode, playerName, onExit }) => {
           gameMessage: message,
         };
         
-        // If it was the leaver's turn, reset turn state for the next player
-        if (oldCurrentPlayer.id === myPlayerId && gameWasInProgress) {
+        // If it was the removed player's turn, reset turn state for the next player
+        if (oldCurrentPlayer.id === playerIdToRemove && gameWasInProgress) {
             const cleanTurnState = createInitialState();
             finalState = {
                 ...finalState,
@@ -1018,7 +1005,38 @@ const Game = ({ roomCode, playerName, onExit }) => {
     }
     
     publishState(finalState);
+  };
+
+  const handleLeaveGame = () => {
+    if (isSpectator) {
+      const state = gameStateRef.current;
+      if(state) {
+          const newSpectators = state.spectators.filter(s => s.id !== mySessionIdRef.current);
+          publishState({...state, spectators: newSpectators});
+      }
+      onExit();
+      return;
+    }
+
+    if (myPlayerId === null) {
+      onExit();
+      return;
+    }
+      
+    handlePlayerRemoval(myPlayerId, false); // wasKicked = false
     onExit();
+  };
+  
+  const handleInitiateKick = (player) => {
+    if (myPlayerId !== gameState.hostId) return;
+    setKickConfirmState({ isOpen: true, player: player });
+  };
+  
+  const handleConfirmKick = () => {
+    if (kickConfirmState.player) {
+      handlePlayerRemoval(kickConfirmState.player.id, true); // wasKicked = true
+    }
+    setKickConfirmState({ isOpen: false, player: null });
   };
 
 
@@ -1117,6 +1135,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
     claimedPlayerCount,
     availableSlotsForJoin,
     currentPlayer,
+    kickConfirmState,
     onLeaveGame: handleLeaveGame,
     onSetShowRules: setShowRules,
     onSetIsSpectatorsModalOpen: setIsSpectatorsModalOpen,
@@ -1133,6 +1152,9 @@ const Game = ({ roomCode, playerName, onExit }) => {
     onDragStart: handleDragStart,
     onDrop: handleDrop,
     onDieDoubleClick: handleDieDoubleClick,
+    onInitiateKick: handleInitiateKick,
+    onConfirmKick: handleConfirmKick,
+    onCancelKick: () => setKickConfirmState({ isOpen: false, player: null }),
   };
 
   return React.createElement(GameUI, uiProps);
