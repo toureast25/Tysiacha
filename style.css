@@ -7,22 +7,28 @@ html, body, #root {
 
 body {
   font-family: 'Roboto Condensed', sans-serif;
-  /* Начальное состояние фона для анимации */
-  background: radial-gradient(ellipse at center, #097763 0%, #311e3f 100%);
+  /* Определяем начальное состояние фона с использованием CSS-переменных для позиции. */
+  /* Эти переменные будут обновляться через JavaScript. */
+  --mouse-x: 50%;
+  --mouse-y: 50%;
+  background: radial-gradient(ellipse 60% 80% at var(--mouse-x) var(--mouse-y), #064e40 0%, #1a1122 100%);
   /* Анимация пульсации фона */
-  animation: pulse-background 12s ease-in-out infinite;
+  animation: pulse-background 15s ease-in-out infinite;
+  /* Добавляем плавный переход для самой позиции градиента, чтобы он не "прыгал" за курсором */
+  transition: background 0.2s linear;
 }
 
 @keyframes pulse-background {
   0% {
-    background: radial-gradient(ellipse at center, #097763 0%, #311e3f 100%);
+    /* Используем более темные и глубокие цвета для более спокойной атмосферы */
+    background: radial-gradient(ellipse 60% 80% at var(--mouse-x) var(--mouse-y), #064e40 0%, #1a1122 100%);
   }
   50% {
-    /* В середине анимации центральный цвет становится светлее и немного расширяется */
-    background: radial-gradient(ellipse at center, #0c9c80 20%, #492c5e 100%);
+    /* Изменение в середине анимации стало менее контрастным и более плавным */
+    background: radial-gradient(ellipse 70% 90% at var(--mouse-x) var(--mouse-y), #086351 0%, #251831 100%);
   }
   100% {
-    background: radial-gradient(ellipse at center, #097763 0%, #311e3f 100%);
+    background: radial-gradient(ellipse 60% 80% at var(--mouse-x) var(--mouse-y), #064e40 0%, #1a1122 100%);
   }
 }
 
