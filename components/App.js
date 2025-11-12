@@ -20,28 +20,6 @@ const App = () => {
   const [initialRoomCode, setInitialRoomCode] = React.useState(null);
   const channelRef = React.useRef(null);
 
-  // --- Эффект для отслеживания курсора и обновления фона ---
-  React.useEffect(() => {
-    const handleMouseMove = (event) => {
-      // Запрашиваем обновление только при необходимости, чтобы не перегружать рендеринг
-      requestAnimationFrame(() => {
-        const { clientX, clientY } = event;
-        const x = Math.round((clientX / window.innerWidth) * 100);
-        const y = Math.round((clientY / window.innerHeight) * 100);
-        // Обновляем CSS-переменные в корневом элементе (<html>)
-        document.documentElement.style.setProperty('--mouse-x', `${x}%`);
-        document.documentElement.style.setProperty('--mouse-y', `${y}%`);
-      });
-    };
-
-    window.addEventListener('mousemove', handleMouseMove);
-
-    // Очищаем слушатель при размонтировании компонента
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-    };
-  }, []); // Пустой массив зависимостей означает, что эффект выполнится один раз
-
   React.useEffect(() => {
     // Инициализация канала связи между вкладками
     channelRef.current = new BroadcastChannel('tysiacha-tab-sync');
