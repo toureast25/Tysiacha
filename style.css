@@ -10,7 +10,7 @@ html, body, #root {
 body {
   font-family: 'Roboto Condensed', sans-serif;
   /* Серый круглый (эллиптический) градиент от центра */
-  background: radial-gradient(ellipse at center, #6f6775 0%, #747c85 100%);
+  background: radial-gradient(ellipse at center, #311e3f 0%, #097763 100%);
 }
 
 .font-ruslan {
