@@ -1,5 +1,3 @@
-
-
 // 
 import React from 'react';
 import { calculateTotalScore, getPlayerBarrelStatus } from '../utils/gameLogic.js';
@@ -90,12 +88,29 @@ const GameUI = (props) => {
         onCancelKick,
     } = props;
 
+    const [isLinkCopied, setIsLinkCopied] = React.useState(false);
     const [contextMenu, setContextMenu] = React.useState({
         isOpen: false,
         player: null,
         x: 0,
         y: 0,
     });
+    
+    const handleCopyLink = () => {
+      // Корректно формируем URL для копирования
+      const path = window.location.pathname.endsWith('index.html') 
+          ? window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/') + 1)
+          : window.location.pathname;
+      const url = `${window.location.origin}${path}?room=${roomCode}`;
+  
+      navigator.clipboard.writeText(url).then(() => {
+          setIsLinkCopied(true);
+          setTimeout(() => setIsLinkCopied(false), 2500); // Сбрасываем состояние через 2.5 секунды
+      }).catch(err => {
+          console.error('Failed to copy link: ', err);
+          alert('Не удалось скопировать ссылку. Пожалуйста, скопируйте код комнаты вручную.');
+      });
+    };
 
     const handlePlayerHeaderClick = (event, player) => {
         event.preventDefault();
@@ -130,7 +145,22 @@ const GameUI = (props) => {
         React.createElement(
           'div', { className: "w-full h-full flex flex-col p-2 sm:p-4 text-white overflow-hidden" },
           React.createElement('header', { className: "flex justify-between items-center mb-2 sm:mb-4 flex-shrink-0" },
-            React.createElement('div', { className: "p-2 bg-black/50 rounded-lg text-sm" }, React.createElement('p', { className: "font-mono" }, `КОД КОМНАТЫ: ${roomCode}`)),
+            React.createElement('div', { className: "flex items-center gap-2 p-2 pr-1 bg-black/50 rounded-lg text-sm" },
+              React.createElement('p', { className: "font-mono" }, `КОД КОМНАТЫ:`),
+              React.createElement('strong', { className: "font-mono text-base text-yellow-300" }, roomCode),
+              React.createElement('button', {
+                onClick: handleCopyLink,
+                className: `p-1.5 rounded-md transition-all duration-200 ${isLinkCopied ? 'bg-green-600' : 'bg-slate-700 hover:bg-slate-600'}`,
+                title: isLinkCopied ? "Ссылка скопирована!" : "Копировать ссылку-приглашение",
+                'aria-label': "Копировать ссылку-приглашение"
+              },
+                isLinkCopied
+                  ? React.createElement('svg', { xmlns: "http://www.w3.org/2000/svg", className: "h-5 w-5 text-white", fill: "none", viewBox: "0 0 24 24", stroke: "currentColor", strokeWidth: 3 },
+                      React.createElement('path', { strokeLinecap: "round", strokeLinejoin: "round", d: "M5 13l4 4L19 7" }))
+                  : React.createElement('svg', { xmlns: "http://www.w3.org/2000/svg", className: "h-5 w-5 text-gray-300", fill: "none", viewBox: "0 0 24 24", stroke: "currentColor", strokeWidth: 2 },
+                      React.createElement('path', { strokeLinecap: "round", strokeLinejoin: "round", d: "M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" }))
+              )
+            ),
             React.createElement('h1', { onClick: () => onSetShowRules(true), className: "font-ruslan text-4xl text-yellow-300 cursor-pointer hover:text-yellow-200 transition-colors", title: "Показать правила" }, 'ТЫСЯЧА'),
             React.createElement('button', { onClick: onLeaveGame, className: "px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg font-bold" }, isSpectator || canJoin ? 'Вернуться в лобби' : 'Выйти из игры')
           ),

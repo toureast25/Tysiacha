@@ -1,4 +1,3 @@
-
 {
   "short_name": "Тысяча",
   "name": "Тысяча - Онлайн Игра в Кости",
@@ -21,7 +20,7 @@
       "purpose": "maskable"
     }
   ],
-  "start_url": ".",
+  "start_url": "index.html",
   "display": "standalone",
   "theme_color": "#1a1a1a",
   "background_color": "#1a1a1a",
@@ -30,7 +29,7 @@
       "name": "Создать новую игру",
       "short_name": "Новая игра",
       "description": "Создать новую игровую комнату и стать хостом",
-      "url": ".",
+      "url": "index.html",
       "icons": [{ "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxOTIiIGhlaWdodD0iMTkyIiB2aWV3Qm94PSIwIDAgMjQgMjQiIGZpbGw9Im5vbmUiIHN0cm9rZT0iY3VycmVudENvbG9yIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTAiLz48bGluZSB4MT0iMTIiIHkxPSI4IiB4Mj0iMTIiIHkyPSIxNiIvPjxsaW5lIHgxPSI4IiB5MT0iMTIiIHgyPSIxNiIgeTI9IjEyIi8+PC9zdmc+", "sizes": "192x192" }]
     }
   ],
