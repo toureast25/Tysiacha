@@ -3,6 +3,7 @@ import React from 'react';
 import GameUI from './GameUI.js';
 import useMqtt from './hooks/useMqtt.js';
 import useGameEngine from './hooks/useGameEngine.js';
+import { getPlayerBarrelStatus } from '../utils/gameLogic.js';
 
 const Game = ({ roomCode, playerName, onExit }) => {
   const mySessionIdRef = React.useRef(sessionStorage.getItem('tysiacha-sessionId') || `sid_${Math.random().toString(36).substr(2, 9)}`);
@@ -127,7 +128,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
   const isAwaitingApproval = myPlayerId === null && gameState.joinRequests && gameState.joinRequests.some(r => r.sessionId === mySessionIdRef.current);
 
   let displayMessage = gameState.gameMessage;
-  const myBarrelStatus = isMyTurn ? getPlayerBarrelStatus(currentPlayer) : null;
+  const myBarrelStatus = isMyTurn && currentPlayer ? getPlayerBarrelStatus(currentPlayer) : null;
 
   if (gameState.isGameOver && !canJoin) {
       if (isHost && claimedPlayerCount < 2) {
