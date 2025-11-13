@@ -65,8 +65,11 @@ const Game = ({ roomCode, playerName, onExit }) => {
 
   const handleConfirmKick = () => {
     if (kickConfirmState.player) {
-      // Dispatch the action. The engine will handle the state change and publish it.
-      handleGameAction('kickPlayer', { playerId: kickConfirmState.player.id });
+      // Dispatch the action with both IDs for robustness.
+      handleGameAction('kickPlayer', { 
+          playerId: kickConfirmState.player.id,
+          sessionId: kickConfirmState.player.sessionId 
+      });
     }
     setKickConfirmState({ isOpen: false, player: null });
   };

@@ -119,9 +119,9 @@ const useGameEngine = (lastReceivedState, lastReceivedAction, publishState, publ
               return finalState;
           }
           case 'kickPlayer': {
-              // This is an action from the host, payload contains { playerId }
-              const { playerId } = payload;
-              const playerToRemove = state.players.find(p => p.id === playerId);
+              const { playerId, sessionId } = payload;
+              // Use both sessionId and playerId for a robust check
+              const playerToRemove = state.players.find(p => p.id === playerId && p.sessionId === sessionId);
               if (!playerToRemove || !playerToRemove.isClaimed) return state;
               
               let newPlayersList = state.players.map(p => 
@@ -173,9 +173,15 @@ const useGameEngine = (lastReceivedState, lastReceivedAction, publishState, publ
           }
           case 'rollDice': {
               if (!state.canRoll || state.isGameOver || !state.isGameStarted) return state;
+              
+              const { dice } = payload;
+              if (!dice || !Array.isArray(dice)) {
+                console.error("RollDice action received without dice values!");
+                return state;
+              }
+              const newDice = dice;
+
               const isHotDiceRoll = state.keptDiceThisTurn.length >= 5;
-              const diceToRollCount = isHotDiceRoll ? 5 : 5 - state.keptDiceThisTurn.length;
-              const newDice = Array.from({ length: diceToRollCount }, () => Math.floor(Math.random() * 6) + 1);
               const { scoringGroups } = analyzeDice(newDice);
               if (scoringGroups.reduce((s, g) => s + g.score, 0) === 0) { // BOLT
                   const currentPlayer = state.players[state.currentPlayerIndex];
@@ -335,13 +341,16 @@ const useGameEngine = (lastReceivedState, lastReceivedAction, publishState, publ
             return { ...createInitialState(), players: newPlayers.map(p => ({...p, justResetFromBarrel: false})), spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameStarted: true, canRoll: true, currentPlayerIndex: nextIdx, gameMessage: msg, turnStartTime: Date.now() };
           }
           case 'presenceUpdate': {
-              const { playerId } = payload;
-              const player = state.players.find(p => p.id === playerId);
-              if (player && player.isClaimed) {
-                  const newPlayers = state.players.map(p => 
-                      p.id === playerId ? { ...p, lastSeen: Date.now() } : p
-                  );
-                  return { ...state, players: newPlayers };
+              const { playerId, senderId } = payload;
+              const playerIndex = state.players.findIndex(p => p.id === playerId && p.sessionId === senderId);
+
+              if (playerIndex !== -1) {
+                  const player = state.players[playerIndex];
+                  if (player.isClaimed) {
+                      const newPlayers = [...state.players];
+                      newPlayers[playerIndex] = { ...player, lastSeen: Date.now() };
+                      return { ...state, players: newPlayers };
+                  }
               }
               return state;
           }
@@ -424,12 +433,30 @@ const useGameEngine = (lastReceivedState, lastReceivedAction, publishState, publ
   const handleGameAction = (type, payload = {}) => {
       const state = gameStateRef.current;
       if (!state) return;
+      
+      // Действия, которые обрабатываются только локально и не отправляются другим игрокам.
+      const localOnlyActions = new Set(['toggleDieSelection']);
 
-      const action = { type, payload };
-      const optimisticState = applyAction(state, { ...action, senderId: mySessionId });
+      let finalPayload = payload;
+
+      // --- Специальная обработка для действий со случайным результатом (бросок костей) ---
+      if (type === 'rollDice') {
+          if (!state.canRoll) return; // Предотвращаем бросок, когда это не разрешено
+          const isHotDiceRoll = state.keptDiceThisTurn.length >= 5;
+          const diceToRollCount = isHotDiceRoll ? 5 : 5 - state.keptDiceThisTurn.length;
+          const newDice = Array.from({ length: diceToRollCount }, () => Math.floor(Math.random() * 6) + 1);
+          
+          finalPayload = { ...payload, dice: newDice };
+      }
+
+      // --- Оптимистичное обновление локального состояния ---
+      const optimisticState = applyAction(state, { type, payload: finalPayload, senderId: mySessionId });
       setGameState(optimisticState);
 
-      publishAction(type, payload);
+      // --- Публикация действия для других игроков (если оно не локальное) ---
+      if (!localOnlyActions.has(type)) {
+          publishAction(type, finalPayload);
+      }
   };
   
   const handleJoinGame = () => {
