@@ -14,19 +14,17 @@ const Game = ({ roomCode, playerName, onExit }) => {
     }
   }, []);
 
-  // useMqtt теперь возвращает publishAction для отправки запросов действий
-  const { connectionStatus, lastReceivedState, lastReceivedAction, publishState, publishAction } = useMqtt(roomCode, playerName, mySessionIdRef.current);
+  const { connectionStatus, lastReceivedState, lastReceivedAction, lastReceivedSyncRequest, publishState, publishAction, requestStateSync } = useMqtt(roomCode, playerName, mySessionIdRef.current);
 
-  // useGameEngine теперь реализует логику "Диктатура Хоста"
   const {
     gameState,
     myPlayerId,
     isSpectator,
-    requestGameAction, // Функция для отправки "просьб" хосту
+    isLocked, // Получаем состояние блокировки
+    requestGameAction,
     handleJoinGame,
     handleLeaveGame: engineHandleLeave,
-    handleJoinRequest,
-  } = useGameEngine(lastReceivedState, lastReceivedAction, publishState, publishAction, playerName, mySessionIdRef.current);
+  } = useGameEngine(lastReceivedState, lastReceivedAction, lastReceivedSyncRequest, publishState, publishAction, requestStateSync, playerName, mySessionIdRef.current);
 
   const [isScoreboardExpanded, setIsScoreboardExpanded] = React.useState(false);
   const [isSpectatorsModalOpen, setIsSpectatorsModalOpen] = React.useState(false);
@@ -65,7 +63,6 @@ const Game = ({ roomCode, playerName, onExit }) => {
 
   const handleConfirmKick = () => {
     if (kickConfirmState.player) {
-      // Отправляем запрос на исключение игрока
       requestGameAction('kickPlayer', { 
           playerId: kickConfirmState.player.id,
           sessionId: kickConfirmState.player.sessionId 
@@ -129,7 +126,13 @@ const Game = ({ roomCode, playerName, onExit }) => {
   const showSkipButton = isHost && !isMyTurn && isCurrentPlayerInactive && !gameState.isGameOver && (Date.now() - gameState.turnStartTime > 60000);
   const canJoin = myPlayerId === null && !isSpectator;
   const availableSlotsForJoin = gameState.players.filter(p => !p.isClaimed && !p.isSpectator).length;
+  
+  // Здесь мы напрямую обрабатываем joinRequests, так как это специфичная логика для хоста
+  const handleJoinRequest = (sessionId, approved) => {
+    requestGameAction('handleJoinRequest', { sessionId, approved });
+  };
   const isAwaitingApproval = myPlayerId === null && gameState.joinRequests && gameState.joinRequests.some(r => r.sessionId === mySessionIdRef.current);
+
 
   let displayMessage = gameState.gameMessage;
   const myBarrelStatus = isMyTurn && currentPlayer ? getPlayerBarrelStatus(currentPlayer) : null;
@@ -172,6 +175,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
     availableSlotsForJoin,
     currentPlayer,
     kickConfirmState,
+    isLocked, // Передаем состояние блокировки в UI
     onLeaveGame: handleLeaveGame,
     onSetShowRules: setShowRules,
     onSetIsSpectatorsModalOpen: setIsSpectatorsModalOpen,

@@ -19,7 +19,7 @@ const useMqtt = (roomCode, playerName, mySessionId) => {
   const topic = `${MQTT_TOPIC_PREFIX}/${roomCode}`;
   const presenceTopic = `${topic}/presence`;
   const actionsTopic = `${topic}/actions`;
-  const syncTopic = `${topic}/sync`; // Новая тема для запроса состояния
+  const syncTopic = `${topic}/sync`;
 
   const publishState = React.useCallback((stateToPublish) => {
     if (mqttClientRef.current && mqttClientRef.current.connected) {
@@ -27,17 +27,25 @@ const useMqtt = (roomCode, playerName, mySessionId) => {
     }
   }, [topic]);
 
-  const publishAction = React.useCallback((actionType, payload) => {
+  const publishAction = React.useCallback((actionType, payload, sequence) => {
       if (mqttClientRef.current && mqttClientRef.current.connected) {
           const action = {
               type: actionType,
               payload: payload,
               senderId: mySessionId,
+              sequence: sequence, // Добавляем порядковый номер
               timestamp: Date.now()
           };
           mqttClientRef.current.publish(actionsTopic, JSON.stringify(action));
       }
   }, [actionsTopic, mySessionId]);
+
+  const requestStateSync = React.useCallback(() => {
+      if (mqttClientRef.current && mqttClientRef.current.connected) {
+          console.log(`[Sync] Requesting full state from host.`);
+          mqttClientRef.current.publish(syncTopic, JSON.stringify({ senderId: mySessionId, type: 'requestState' }));
+      }
+  }, [syncTopic, mySessionId]);
 
 
   React.useEffect(() => {
@@ -57,12 +65,10 @@ const useMqtt = (roomCode, playerName, mySessionId) => {
       client.subscribe(topic);
       client.subscribe(actionsTopic);
       client.subscribe(presenceTopic);
-      client.subscribe(syncTopic); // Подписываемся на тему синхронизации
+      client.subscribe(syncTopic);
 
-      // Запрашиваем полный "снимок" состояния при подключении
-      client.publish(syncTopic, JSON.stringify({ senderId: mySessionId, type: 'requestState' }));
+      requestStateSync();
 
-      // Если в течение 2 секунд не придет состояние, значит, это новая комната.
       setTimeout(() => {
         if (!isStateReceivedRef.current) {
           setLastReceivedState({ isInitial: true });
@@ -76,25 +82,24 @@ const useMqtt = (roomCode, playerName, mySessionId) => {
         const payload = JSON.parse(messageString);
 
         if (receivedTopic === topic) {
-          if (payload.senderId === mySessionId && !payload.isInitial) return;
           isStateReceivedRef.current = true;
           setLastReceivedState(currentState => {
-            if (currentState && payload.version <= currentState.version) {
+            if (currentState && payload.version <= currentState.version && !payload.isFullSync) {
               return currentState;
             }
             return payload;
           });
         } else if (receivedTopic === actionsTopic) {
-          // Ключевое изменение: НЕ фильтруем свои же сообщения.
-          // Хост тоже должен получать свои "приказы", чтобы его состояние обновлялось.
-          setLastReceivedAction(payload);
+          setLastReceivedAction({ ...payload, uniqueId: `${payload.sequence}-${payload.timestamp}` });
         
         } else if (receivedTopic === presenceTopic) {
           if (payload.senderId === mySessionId) return;
-          setLastReceivedAction({ type: 'presenceUpdate', payload });
+          // Presence is not sequenced, it's a transient state update
+          setLastReceivedAction({ type: 'presenceUpdate', payload, uniqueId: `presence-${Date.now()}` });
         } else if (receivedTopic === syncTopic) {
-          // Получили запрос на синхронизацию
-          setLastReceivedSyncRequest(payload);
+          if (payload.senderId !== mySessionId) {
+             setLastReceivedSyncRequest(payload);
+          }
         }
       } catch (e) {
         console.error(`Error parsing message on topic ${receivedTopic}:`, e);
@@ -112,7 +117,7 @@ const useMqtt = (roomCode, playerName, mySessionId) => {
       if (client.connected && lastReceivedStateRef.current) {
         const me = lastReceivedStateRef.current.players?.find(p => p.sessionId === mySessionId);
         if (me && me.isClaimed && !me.isSpectator) {
-          client.publish(presenceTopic, JSON.stringify({ playerId: me.id, senderId: mySessionId }));
+          client.publish(presenceTopic, JSON.stringify({ playerId: me.id, sessionId: mySessionId }));
         }
       }
     }, 5000);
@@ -123,9 +128,9 @@ const useMqtt = (roomCode, playerName, mySessionId) => {
         client.end(true);
       }
     };
-  }, [roomCode, mySessionId, topic, presenceTopic, actionsTopic, syncTopic]);
+  }, [roomCode, mySessionId, topic, presenceTopic, actionsTopic, syncTopic, requestStateSync]);
 
-  return { connectionStatus, lastReceivedState, lastReceivedAction, lastReceivedSyncRequest, publishState, publishAction };
+  return { connectionStatus, lastReceivedState, lastReceivedAction, lastReceivedSyncRequest, publishState, publishAction, requestStateSync };
 };
 
 export default useMqtt;
