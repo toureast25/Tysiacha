@@ -1,4 +1,3 @@
-// hooks/useGameEngine.js
 import React from 'react';
 import {
   createInitialState,

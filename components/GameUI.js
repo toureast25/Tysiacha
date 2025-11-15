@@ -315,42 +315,42 @@ const GameUI = (props) => {
               ),
               React.createElement('div', { className: "flex-grow w-full flex flex-col items-center justify-center pt-2 pb-2 sm:pt-3 sm:pb-6 px-0 sm:px-4" },
                 React.createElement('div', { className: "w-full sm:max-w-[480px] flex items-center justify-between min-h-[72px] sm:min-h-[80px]" },
-                  gameState.diceOnBoard.map((value, i) => React.createElement(DiceIcon, { key: `board-${i}`, value: value, isSelected: gameState.selectedDiceIndices.includes(i), onClick: isMyTurn ? () => onToggleDieSelection(i) : null, onDragStart: (e) => onDragStart(e, i), onDoubleClick: isMyTurn ? () => onDieDoubleClick(i) : null })),
+                  gameState.diceOnBoard.map((value, i) => React.createElement(DiceIcon, { key: `board-${i}`, value: value, isSelected: gameState.selectedDiceIndices.includes(i), onClick: isMyTurn ? () => onToggleDieSelection(i) : null, onDragStart: isMyTurn ? (e) => onDragStart(e, i) : null, onDoubleClick: isMyTurn ? () => onDieDoubleClick(i) : null })),
                   Array.from({ length: 5 - gameState.diceOnBoard.length }).map((_, i) => React.createElement(DiceIcon, { key: `placeholder-${i}`, value: 0 }))
-                ),
-                React.createElement('div', { className: `mt-2 sm:mt-4 text-center transition-opacity duration-300 ${gameState.potentialScore > 0 ? 'opacity-100' : 'opacity-0'}`}, 
-                    React.createElement('p', { className: "font-bold text-xl text-highlight" }, `+${gameState.potentialScore}`)
                 )
               ),
-              canJoin
-                ? React.createElement('div', { className: 'w-full flex flex-col items-center gap-4' },
-                    React.createElement('h3', { className: 'font-ruslan text-2xl text-title-yellow text-center' }, 'Присоединиться к игре?'),
-                    React.createElement('div', { className: 'flex gap-4' },
-                        React.createElement('button', { onClick: onJoinGame, disabled: availableSlotsForJoin === 0, className: 'px-8 py-3 bg-green-600 hover:bg-green-700 rounded-lg text-lg font-bold disabled:bg-gray-500' }, `Занять место (${availableSlotsForJoin} свободно)`),
-                        React.createElement('button', { onClick: () => { if (window.confirm("Присоединиться зрителем?")) { onJoinGame(true); }}, className: 'px-8 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg text-lg font-bold' }, 'Зрителем')
-                    )
-                  )
-                : isAwaitingApproval 
-                    ? React.createElement(AwaitingApprovalScreen)
-                    : React.createElement('div', { className: "w-full flex items-center justify-between flex-wrap gap-2 sm:gap-4" },
-                        React.createElement('div', { className: "flex flex-col text-center" },
-                            React.createElement('p', { className: "text-sm text-gray-400" }, 'Очки за ход'),
-                            React.createElement('p', { className: "text-4xl font-bold font-mono" }, gameState.currentTurnScore)
-                        ),
-                        React.createElement('div', { className: "flex items-center gap-2 sm:gap-4 justify-center flex-grow" },
-                            gameState.isGameOver
-                            ? isHost && claimedPlayerCount >= 2 && React.createElement('button', { onClick: onNewGame, className: "px-6 py-3 text-lg font-bold uppercase bg-blue-600 hover:bg-blue-700 rounded-lg transition-transform hover:scale-105" }, 'Новая игра')
-                            : gameState.isGameStarted
-                                ? React.createElement(React.Fragment, null,
-                                    React.createElement('button', { onClick: onBankScore, disabled: !gameState.canBank || !isMyTurn, className: "px-6 py-3 text-lg font-bold uppercase bg-green-600 hover:bg-green-700 rounded-lg transition-transform hover:scale-105 disabled:bg-gray-500 disabled:cursor-not-allowed" }, 'Записать'),
-                                    React.createElement('button', { onClick: onRollDice, disabled: !gameState.canRoll || !isMyTurn, className: "px-6 py-3 text-lg font-bold uppercase bg-yellow-500 hover:bg-yellow-600 rounded-lg transition-transform hover:scale-105 disabled:bg-gray-500 disabled:cursor-not-allowed" }, rollButtonText)
-                                  )
-                                : isHost && React.createElement('button', { onClick: onStartOfficialGame, disabled: claimedPlayerCount < 2, className: 'px-6 py-3 text-lg font-bold uppercase bg-green-600 hover:bg-green-700 rounded-lg transition-transform hover:scale-105 disabled:bg-gray-500' }, claimedPlayerCount < 2 ? 'Нужен еще игрок' : 'Начать игру')
-                        ),
-                        React.createElement('div', { className: "flex justify-end min-w-[100px]" }, 
-                            showSkipButton && React.createElement('button', { onClick: onSkipTurn, className: "px-4 py-2 bg-slate-600 hover:bg-slate-700 text-sm font-bold rounded-lg" }, `Пропустить ${currentPlayer.name}`)
+              React.createElement('div', { className: "w-full" },
+                 showSkipButton && React.createElement('div', {className: 'text-center mb-2'}, React.createElement('button', {onClick: onSkipTurn, className: 'px-4 py-2 bg-orange-600 hover:bg-orange-700 rounded-lg font-bold animate-pulse'}, `Пропустить ход ${currentPlayer.name}`)),
+                React.createElement('div', { className: "text-center mb-2 sm:mb-4" },
+                  React.createElement('p', { className: "text-xl" }, 'Очки за ход: ', React.createElement('span', { className: "font-ruslan text-5xl text-green-400" }, gameState.currentTurnScore + gameState.potentialScore))
+                ),
+                React.createElement('div', { className: "max-w-2xl mx-auto w-full" },
+                  isAwaitingApproval
+                    ? React.createElement(AwaitingApprovalScreen, null)
+                    : canJoin
+                      ? React.createElement('button', { 
+                          onClick: onJoinGame, 
+                          disabled: availableSlotsForJoin === 0, 
+                          className: "w-full py-5 sm:py-4 bg-green-600 hover:bg-green-700 rounded-lg text-2xl font-bold uppercase tracking-wider transition-all duration-300 transform hover:scale-105 shadow-lg disabled:bg-gray-500 disabled:cursor-not-allowed disabled:scale-100" 
+                        }, 
+                          availableSlotsForJoin > 0 ? `Войти в игру (${availableSlotsForJoin} мест)` : 'Нет свободных мест'
                         )
-                    )
+                      : gameState.isGameOver
+                        ? (isHost
+                            ? React.createElement('button', { onClick: onNewGame, disabled: claimedPlayerCount < 2, className: "w-full py-3 sm:py-4 bg-blue-600 hover:bg-blue-700 rounded-lg text-2xl font-bold uppercase tracking-wider transition-all duration-300 transform hover:scale-105 shadow-lg disabled:bg-gray-500 disabled:cursor-not-allowed disabled:scale-100" }, 'Новая Игра')
+                            : null
+                          )
+                        : !gameState.isGameStarted 
+                          ? (isHost
+                              ? React.createElement('button', { onClick: onStartOfficialGame, disabled: claimedPlayerCount < 2, className: "w-full py-5 sm:py-4 bg-blue-600 hover:bg-blue-700 rounded-lg text-2xl font-bold uppercase tracking-wider transition-all duration-300 transform hover:scale-105 shadow-lg disabled:bg-gray-500 disabled:cursor-not-allowed disabled:scale-100" }, 'Начать игру')
+                              : React.createElement('div', { className: "text-center text-lg text-gray-400" }, 'Ожидание начала игры от хоста...')
+                            )
+                          : React.createElement('div', { className: "grid grid-cols-1 md:grid-cols-2 gap-2 sm:gap-4" },
+                              React.createElement('button', { onClick: onRollDice, disabled: !isMyTurn || !gameState.canRoll, className: "w-full py-2 sm:py-3 bg-green-600 hover:bg-green-700 rounded-lg text-xl font-bold uppercase tracking-wider transition-all duration-300 transform hover:scale-105 shadow-lg disabled:bg-gray-500 disabled:cursor-not-allowed disabled:scale-100" }, rollButtonText),
+                              React.createElement('button', { onClick: onBankScore, disabled: !isMyTurn || !gameState.canBank, className: "w-full py-2 sm:py-3 bg-action-yellow hover:bg-hover-yellow text-slate-900 rounded-lg text-xl font-bold uppercase tracking-wider transition-all duration-300 transform hover:scale-105 shadow-lg disabled:bg-gray-500 disabled:cursor-not-allowed disabled:scale-100" }, 'Записать')
+                            )
+                )
+              )
             )
           )
         )

@@ -1,4 +1,3 @@
-// 
 import React from 'react';
 
 const PlayerContextMenu = ({ player, position, onClose, onAction }) => {
