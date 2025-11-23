@@ -157,8 +157,11 @@ const Game = ({ roomCode, playerName, initialMode, localConfig, onExit }) => {
     onLeaveGame: () => { 
         if (!isLocalMode) {
              sendAction({ type: 'PLAYER_LEAVE', payload: { sessionId: mySessionIdRef.current } }); 
+             // Небольшая задержка перед размонтированием, чтобы сообщение успело уйти
+             setTimeout(() => onExit(), 150);
+        } else {
+             onExit(); 
         }
-        onExit(); 
     },
     onSetShowRules: setShowRules,
     onSetIsSpectatorsModalOpen: setIsSpectatorsModalOpen,

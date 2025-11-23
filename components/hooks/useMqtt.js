@@ -27,7 +27,8 @@ export const useMqtt = ({
 
         let client;
         try {
-            client = createMqttClient(mySessionId);
+            // Pass roomCode to enable Last Will (LWT)
+            client = createMqttClient(mySessionId, roomCode);
             clientRef.current = client;
         } catch (e) {
             setConnectionStatus('error');
@@ -180,17 +181,8 @@ export const useMqtt = ({
         };
     }, [roomCode, initialMode, playerName, isHost, isLocalMode]);
 
-    // --- HOST BROADCAST EFFECT ---
-    // Вынесли этот эффект тоже сюда, так как он относится к отправке данных
     React.useEffect(() => {
         if (isLocalMode) return;
-
-        // Внимание: мы используем gameStateRef для чтения, но зависим от изменения состояния извне (через пропсы или логику Game.js)
-        // Но здесь мы не имеем прямого доступа к триггеру изменения.
-        // Поэтому этот Effect лучше оставить в Game.js, либо передавать gameState явно в useMqtt.
-        // В текущей реализации мы будем передавать gameState в useMqtt аргументах? 
-        // Нет, лучше оставить broadcast в Game.js, так как он реактивен к gameState.
-        // Или добавить сюда:
     }, []); 
 
     return { clientRef, connectionStatus, roomTopicRef };

@@ -14,7 +14,7 @@ import {
 const findNextActivePlayer = (startIndex, players) => {
     let nextIndex = (startIndex + 1) % players.length;
     while (nextIndex !== startIndex) {
-        if (players[nextIndex].isClaimed && !players[nextIndex].isSpectator) {
+        if (players[nextIndex].isClaimed && !players[nextIndex].isSpectator && players[nextIndex].status === 'online') {
             return nextIndex;
         }
         nextIndex = (nextIndex + 1) % players.length;
@@ -40,6 +40,20 @@ function gameReducer(state, action) {
         if (asSpectator) {
             return { ...newState, spectators: [...newState.spectators, { name: playerName, id: sessionId }] };
         }
+
+        // 1. Попытка восстановить игрока по имени (Rejoin Logic)
+        const existingPlayerIndex = newState.players.findIndex(p => p.isClaimed && p.name === playerName);
+        if (existingPlayerIndex !== -1) {
+            // Игрок с таким именем уже есть. Перехватываем слот.
+            const newPlayers = newState.players.map((p, i) => 
+                i === existingPlayerIndex
+                ? { ...p, sessionId: sessionId, status: 'online', lastSeen: Date.now() } // Обновляем SessionID и статус
+                : p
+            );
+            return { ...newState, players: newPlayers, gameMessage: `${playerName} вернулся в игру.` };
+        }
+
+        // 2. Если имя новое, ищем свободный слот
         const joinIndex = newState.players.findIndex(p => !p.isClaimed);
         if (joinIndex === -1) return newState;
 
@@ -54,54 +68,76 @@ function gameReducer(state, action) {
         );
         return { ...newState, players: newPlayers, leavers: newLeavers, gameMessage: `${playerName} присоединился.` };
     }
+
+    // Обработка автоматического отключения (Last Will)
+    case 'PLAYER_DISCONNECT': {
+        const { sessionId } = action.payload;
+        const newPlayers = newState.players.map(p => 
+            p.sessionId === sessionId 
+            ? { ...p, status: 'offline' } 
+            : p
+        );
+        return { ...newState, players: newPlayers };
+    }
     
+    // Обработка ручного выхода
     case 'PLAYER_LEAVE': {
       const { sessionId } = action.payload;
+      
+      // Если это зритель
       if (newState.spectators.some(s => s.id === sessionId)) {
            return {...newState, spectators: newState.spectators.filter(s => s.id !== sessionId)};
       }
+      
       const playerIndex = newState.players.findIndex(p => p.sessionId === sessionId);
       if (playerIndex === -1) return newState;
       
       const playerToRemove = newState.players[playerIndex];
-      if (!playerToRemove.isClaimed) return newState;
+      
+      // ВАЖНО: Мы больше не удаляем игрока полностью (reset), если игра уже идет.
+      // Мы ставим статус 'offline', чтобы сохранить место и очки для перезахода.
+      // Если игра еще не началась - можно освободить слот.
+      
+      const gameIsActive = newState.isGameStarted && !newState.isGameOver;
+      
+      let newPlayers;
+      let newLeavers = { ...newState.leavers };
 
-      const totalScore = calculateTotalScore(playerToRemove);
-      const newLeavers = totalScore > 0 ? { ...newState.leavers, [playerToRemove.name]: totalScore } : newState.leavers;
+      if (gameIsActive) {
+          // Игра идет: метим как offline
+          newPlayers = newState.players.map(p => p.sessionId === sessionId ? { ...p, status: 'offline' } : p);
+      } else {
+          // Игра в лобби: освобождаем слот
+          newPlayers = newState.players.map(p => p.sessionId === sessionId ? { ...createInitialState().players[0], id: p.id, name: `Игрок ${p.id + 1}` } : p);
+      }
       
-      // Сбрасываем слот игрока
-      let newPlayers = newState.players.map(p => p.sessionId === sessionId ? { ...createInitialState().players[0], id: p.id, name: `Игрок ${p.id + 1}` } : p);
-      
-      const gameWasInProgress = !newState.isGameOver && newState.isGameStarted;
+      // Логика передачи хода, если ушел текущий игрок
       let newCurrentPlayerIndex = newState.currentPlayerIndex;
-
-      // Если ушел тот, чей был ход, передаем ход следующему
-      if (gameWasInProgress && newState.currentPlayerIndex === playerIndex) {
+      if (gameIsActive && newState.currentPlayerIndex === playerIndex) {
           newCurrentPlayerIndex = findNextActivePlayer(newState.currentPlayerIndex, newPlayers);
       }
       
-      // Логика передачи Хоста, если ушел Хост
+      // Логика передачи Хоста
       let newHostId = newState.hostId;
       if (playerToRemove.id === newState.hostId) {
           const nextHostId = findNextHost(newPlayers);
           newHostId = nextHostId !== null ? nextHostId : 0;
       }
-      
-      const remainingPlayers = newPlayers.filter(p => p.isClaimed && !p.isSpectator);
-      if (gameWasInProgress && remainingPlayers.length < 2) {
-        return { ...newState, players: newPlayers, hostId: newHostId, leavers: newLeavers, isGameOver: true, gameMessage: 'Игра окончена (недостаточно игроков).' };
-      }
-      
+
       let message = `${playerToRemove.name} вышел.`;
       if (newHostId !== newState.hostId) {
            const newHostName = newPlayers.find(p => p.id === newHostId)?.name || `Игрок ${newHostId + 1}`;
            message += ` Права хоста переданы ${newHostName}.`;
       }
-      if (gameWasInProgress && newState.currentPlayerIndex === playerIndex) {
-          message += ` Ход ${newPlayers[newCurrentPlayerIndex].name}.`;
-      }
       
-      return { ...newState, players: newPlayers, hostId: newHostId, leavers: newLeavers, gameMessage: message, currentPlayerIndex: newCurrentPlayerIndex };
+      return { 
+          ...newState, 
+          players: newPlayers, 
+          hostId: newHostId, 
+          leavers: newLeavers, 
+          gameMessage: message, 
+          currentPlayerIndex: newCurrentPlayerIndex 
+      };
     }
     
     case 'TOGGLE_DIE_SELECTION': {
@@ -292,6 +328,7 @@ function gameReducer(state, action) {
         const { playerId } = action.payload;
         const playerToKick = newState.players.find(p => p.id === playerId);
         if (!playerToKick) return state;
+        // Принудительное удаление (сброс слота)
         let newPlayers = newState.players.map(p => p.id === playerId ? { ...createInitialState().players[0], id: p.id, name: `Игрок ${p.id + 1}` } : p);
         let newCurrentPlayerIndex = newState.currentPlayerIndex;
         if(newState.currentPlayerIndex === playerId) {

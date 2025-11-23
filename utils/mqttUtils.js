@@ -9,7 +9,8 @@ export const getRoomTopic = (roomCode) => {
 };
 
 // Создает MQTT клиент
-export const createMqttClient = (clientId) => {
+// roomCode нужен для установки LWT (Last Will and Testament)
+export const createMqttClient = (clientId, roomCode) => {
     if (!window.mqtt) {
         throw new Error("MQTT library not loaded");
     }
@@ -32,6 +33,23 @@ export const createMqttClient = (clientId) => {
         ssl: true, 
     };
 
+    // --- LAST WILL AND TESTAMENT (Последняя воля) ---
+    // Если соединение разорвется аварийно, брокер отправит это сообщение за нас.
+    if (roomCode && roomCode !== 'LOCAL') {
+        const topic = getRoomTopic(roomCode);
+        const payload = JSON.stringify({ 
+            type: 'PLAYER_DISCONNECT', 
+            payload: { sessionId: clientId },
+            senderId: clientId 
+        });
+        options.will = {
+            topic: topic,
+            payload: payload,
+            qos: 1,
+            retain: false
+        };
+    }
+
     const client = window.mqtt.connect(brokerUrl, options);
 
     return client;
@@ -43,7 +61,8 @@ export const checkRoomAvailability = (roomCode) => {
         const tempId = `checker_${Math.random().toString(16).substr(2, 8)}`;
         let client;
         try {
-             client = createMqttClient(tempId);
+             // Для чекера не устанавливаем LWT
+             client = createMqttClient(tempId, null);
         } catch (e) {
              console.error("Failed to create MQTT client for check:", e);
              resolve({ exists: false });
