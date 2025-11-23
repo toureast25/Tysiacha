@@ -4,4 +4,4 @@
 // Это обеспечивает надежную доставку сообщений и работу через NAT/Firewall.
 // Хост игры действует как источник правды (state owner).
 
-export const APP_VERSION = '3.0.19';
+export const APP_VERSION = '3.0.21';

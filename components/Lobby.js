@@ -5,10 +5,12 @@ import { checkRoomAvailability } from '../utils/mqttUtils.js';
 const Lobby = ({ onStartGame, initialRoomCode }) => {
   const [roomCode, setRoomCode] = React.useState('');
   const [playerName, setPlayerName] = React.useState('');
-  const [roomStatus, setRoomStatus] = React.useState(null); // { status: 'loading' | 'found' | 'not_found' | 'uncertain', message?: string }
-  const [isLoading, setIsLoading] = React.useState(false);
+  const [roomInfo, setRoomInfo] = React.useState({ status: 'idle', hostName: null }); // idle, checking, exists, free, error
   const [showLocalSetup, setShowLocalSetup] = React.useState(false);
   const [localPlayerCount, setLocalPlayerCount] = React.useState(2);
+  
+  // Ref для дебаунса ввода
+  const checkTimeoutRef = React.useRef(null);
 
   React.useEffect(() => {
     const savedName = localStorage.getItem('tysiacha-playerName');
@@ -22,6 +24,39 @@ const Lobby = ({ onStartGame, initialRoomCode }) => {
     }
   }, [initialRoomCode]);
 
+  // Эффект для динамической проверки комнаты
+  React.useEffect(() => {
+      const code = roomCode.trim().toUpperCase();
+      
+      if (code.length !== 5) {
+          setRoomInfo({ status: 'idle', hostName: null });
+          return;
+      }
+
+      setRoomInfo({ status: 'checking' });
+      
+      if (checkTimeoutRef.current) clearTimeout(checkTimeoutRef.current);
+
+      checkTimeoutRef.current = setTimeout(async () => {
+          try {
+              const result = await checkRoomAvailability(code);
+              if (result.error) {
+                  setRoomInfo({ status: 'error' });
+              } else if (result.exists) {
+                  setRoomInfo({ status: 'exists', hostName: result.hostName });
+              } else {
+                  setRoomInfo({ status: 'free' });
+              }
+          } catch (e) {
+              setRoomInfo({ status: 'error' });
+          }
+      }, 600); // Задержка проверки 600мс после ввода
+
+      return () => {
+          if (checkTimeoutRef.current) clearTimeout(checkTimeoutRef.current);
+      };
+  }, [roomCode]);
+
   const generateRoomCode = () => {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; 
     let result = '';
@@ -29,63 +64,31 @@ const Lobby = ({ onStartGame, initialRoomCode }) => {
       result += chars.charAt(Math.floor(Math.random() * chars.length));
     }
     setRoomCode(result);
-    setRoomStatus(null); 
+    // При генерации код сразу валидный, эффект useEffect сработает и проверит его (скорее всего будет Free)
   };
 
-  const checkRoom = React.useCallback(async () => {
-    const code = roomCode.trim().toUpperCase();
-    if (code.length !== 5) return;
-
-    setIsLoading(true);
-    setRoomStatus({ status: 'loading' });
-
-    try {
-        const result = await checkRoomAvailability(code);
-        
-        if (result.exists) {
-             setRoomStatus({ status: 'found', message: 'Комната найдена!' });
-        } else {
-             setRoomStatus({ status: 'not_found', message: 'Комната свободна' });
-        }
-        setIsLoading(false);
-
-    } catch (e) {
-        console.error(e);
-        setRoomStatus({ status: 'uncertain', message: 'Ошибка подключения' });
-        setIsLoading(false);
-    }
-  }, [roomCode]);
-
-  // Reset status on typing
-  React.useEffect(() => {
-      if (roomCode.length === 5) {
-          const timer = setTimeout(() => {
-             setRoomStatus(null); 
-          }, 500);
-          return () => clearTimeout(timer);
-      }
-  }, [roomCode]);
-
-
-  const handleStart = () => {
+  const handleUniversalStart = () => {
     const finalRoomCode = roomCode.trim().toUpperCase();
     const finalPlayerName = playerName.trim();
     
-    if (finalRoomCode.length === 5 && finalPlayerName.length > 2) {
-      localStorage.setItem('tysiacha-playerName', finalPlayerName);
-      
-      let mode = 'join'; // Default safe assumption
-      
-      if (roomStatus?.status === 'not_found') {
-          mode = 'create';
-      } else if (roomStatus?.status === 'found') {
-          mode = 'join';
-      } else if (roomStatus === null) {
-          mode = 'join'; 
-      }
-      
-      onStartGame(finalRoomCode, finalPlayerName, mode);
+    if (finalRoomCode.length !== 5 || finalPlayerName.length < 3) return;
+
+    localStorage.setItem('tysiacha-playerName', finalPlayerName);
+    
+    // Если мы уже знаем статус, используем его. Если нет (например, нажали слишком быстро), считаем что создаем, если не проверено.
+    // Но лучше опираться на roomInfo.status
+    
+    let mode = 'create';
+    if (roomInfo.status === 'exists') {
+        mode = 'join';
+    } else if (roomInfo.status === 'free') {
+        mode = 'create';
+    } else {
+        // Fallback: если статус не определен (глюк или быстрый клик), пробуем create
+        mode = 'create'; 
     }
+    
+    onStartGame(finalRoomCode, finalPlayerName, mode);
   };
 
   const handleStartLocal = () => {
@@ -93,10 +96,12 @@ const Lobby = ({ onStartGame, initialRoomCode }) => {
   };
   
   const RoomStatusInfo = () => {
-    if (!roomCode || roomCode.trim().length < 5) return React.createElement('div', { className: "text-sm text-gray-400 mt-2 min-h-[20px]" }, 'Код должен быть из 5 символов');
-    
-    if (isLoading || roomStatus?.status === 'loading') {
-         return React.createElement('div', { className: "text-sm text-gray-400 mt-2 min-h-[20px] flex items-center justify-center" }, 
+    if (roomCode.length !== 5) {
+         return React.createElement('div', { className: "text-sm text-gray-500 mt-2 min-h-[24px]" }, 'Введите код из 5 символов');
+    }
+
+    if (roomInfo.status === 'checking') {
+         return React.createElement('div', { className: "text-sm text-gray-400 mt-2 min-h-[24px] flex items-center justify-center" }, 
             React.createElement('div', { className: "flex items-center" },
                 React.createElement('div', {className: "w-4 h-4 border-2 border-t-transparent border-title-yellow rounded-full animate-spin mr-2"}), 
                 'Проверка комнаты...'
@@ -104,32 +109,31 @@ const Lobby = ({ onStartGame, initialRoomCode }) => {
         );
     }
 
-    if (roomStatus?.status === 'found') {
-        return React.createElement('div', { className: "text-sm text-green-400 mt-2 min-h-[20px] flex items-center justify-center font-bold" }, 
-             'Комната активна! Можно войти.'
-        );
-    }
-    
-    if (roomStatus?.status === 'not_found') {
-        return React.createElement('div', { className: "text-sm text-blue-300 mt-2 min-h-[20px] flex items-center justify-center" }, 
-             'Комната свободна. Будет создана новая.'
-        );
+    if (roomInfo.status === 'error') {
+        return React.createElement('div', { className: "text-sm text-red-400 mt-2 min-h-[24px]" }, 'Ошибка сети');
     }
 
-    if (roomStatus?.status === 'uncertain') {
-        return React.createElement('div', { className: "text-sm text-yellow-400 mt-2 min-h-[20px] flex items-center justify-center" }, 
-             roomStatus.message || 'Статус неизвестен'
+    if (roomInfo.status === 'exists') {
+        return React.createElement('div', { className: "text-sm text-blue-400 mt-2 min-h-[24px] font-bold animate-pulse" }, 
+            `Комната найдена! Хост: ${roomInfo.hostName}`
         );
     }
     
-    return React.createElement('div', { className: "text-sm text-gray-500 mt-2 min-h-[20px]" }, 'Нажмите "Проверить" или "Играть"');
+    if (roomInfo.status === 'free') {
+        return React.createElement('div', { className: "text-sm text-green-400 mt-2 min-h-[24px]" }, 
+            'Комната свободна. Вы будете хостом.'
+        );
+    }
+    
+    return React.createElement('div', { className: "min-h-[24px]" });
   }
 
-  let buttonText = 'Войти';
-  if (roomStatus?.status === 'not_found') buttonText = 'Создать игру';
-  if (roomStatus?.status === 'uncertain') buttonText = 'Попробовать';
-
-  const isButtonDisabled = roomCode.trim().length !== 5 || playerName.trim().length < 3 || isLoading;
+  // Блокируем кнопку, если идет проверка
+  const isButtonDisabled = roomCode.trim().length !== 5 || playerName.trim().length < 3 || roomInfo.status === 'checking';
+  
+  let buttonText = 'ИГРАТЬ';
+  if (roomInfo.status === 'exists') buttonText = 'ВОЙТИ В ИГРУ';
+  if (roomInfo.status === 'free') buttonText = 'СОЗДАТЬ ИГРУ';
 
   return React.createElement(
     'div',
@@ -171,8 +175,10 @@ const Lobby = ({ onStartGame, initialRoomCode }) => {
                 id: "roomCode",
                 type: "text",
                 value: roomCode,
-                onChange: (e) => setRoomCode(e.target.value.toUpperCase().slice(0, 5)),
-                onBlur: checkRoom, 
+                onChange: (e) => {
+                    setRoomCode(e.target.value.toUpperCase().slice(0, 5));
+                },
+                onKeyDown: (e) => { if (e.key === 'Enter' && !isButtonDisabled) handleUniversalStart(); },
                 placeholder: "5 символов",
                 maxLength: 5,
                 className: "w-full p-3 pr-12 text-center bg-slate-900 border-2 border-slate-600 rounded-lg text-2xl font-mono tracking-widest text-white focus:outline-none focus:border-highlight transition-colors"
@@ -198,26 +204,13 @@ const Lobby = ({ onStartGame, initialRoomCode }) => {
             'div',
             { className: "flex flex-col gap-4" },
             React.createElement(
-              'div',
-              { className: "flex gap-3" },
-              React.createElement(
-                  'button',
-                  {
-                  onClick: checkRoom,
-                  disabled: isButtonDisabled,
-                  className: "flex-1 py-3 bg-slate-600 hover:bg-slate-700 rounded-lg font-bold transition-all disabled:bg-gray-500 disabled:cursor-not-allowed"
-                  },
-                  "Проверить"
-              ),
-              React.createElement(
-                  'button',
-                  {
-                  onClick: handleStart,
-                  className: "flex-[2] py-3 bg-green-600 hover:bg-green-700 rounded-lg text-xl font-bold uppercase tracking-wider transition-all duration-300 transform hover:scale-105 shadow-lg disabled:bg-gray-500 disabled:cursor-not-allowed",
-                  disabled: isButtonDisabled
-                  },
-                  buttonText
-              )
+                'button',
+                {
+                onClick: handleUniversalStart,
+                className: `w-full py-4 rounded-lg text-2xl font-bold uppercase tracking-wider transition-all duration-300 transform hover:scale-105 shadow-lg disabled:bg-gray-500 disabled:cursor-not-allowed disabled:scale-100 disabled:shadow-none ${roomInfo.status === 'exists' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-green-600 hover:bg-green-700'}`,
+                disabled: isButtonDisabled
+                },
+                buttonText
             ),
             React.createElement('div', { className: "relative flex py-2 items-center" },
                 React.createElement('div', { className: "flex-grow border-t border-slate-600" }),

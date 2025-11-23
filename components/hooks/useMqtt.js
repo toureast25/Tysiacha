@@ -110,8 +110,15 @@ export const useMqtt = ({
 
                 if (data.type === 'PING_HOST') {
                     if (isHostRef.current) {
-                        // Кто-то проверяет комнату. Отвечаем.
-                        client.publish(roomTopicRef.current, JSON.stringify({ type: 'PONG_HOST', senderId: mySessionId }));
+                        // Кто-то проверяет комнату. Отвечаем именем текущего хоста.
+                        const currentGameState = gameStateRef.current;
+                        const hostName = currentGameState?.players[currentGameState.hostId]?.name || 'Host';
+                        
+                        client.publish(roomTopicRef.current, JSON.stringify({ 
+                            type: 'PONG_HOST', 
+                            senderId: mySessionId,
+                            hostName: hostName
+                        }));
                     }
                     return;
                 }

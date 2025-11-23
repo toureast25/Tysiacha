@@ -65,7 +65,7 @@ export const checkRoomAvailability = (roomCode) => {
              client = createMqttClient(tempId, null);
         } catch (e) {
              console.error("Failed to create MQTT client for check:", e);
-             resolve({ exists: false });
+             resolve({ exists: false, error: true });
              return;
         }
 
@@ -91,13 +91,16 @@ export const checkRoomAvailability = (roomCode) => {
                     found = true;
                     clearTimeout(timeout);
                     client.end(true);
-                    resolve({ exists: true });
+                    resolve({ 
+                        exists: true, 
+                        hostName: data.hostName || 'Неизвестный' 
+                    });
                 }
             } catch (e) {}
         });
 
         client.on('error', (err) => {
-            console.warn("Check room temporary error (check credentials in config.js):", err);
+            console.warn("Check room temporary error:", err);
         });
 
         // Ждем ответа. 
@@ -106,6 +109,6 @@ export const checkRoomAvailability = (roomCode) => {
                 if (client) client.end(true);
                 resolve({ exists: false });
             }
-        }, 5000);
+        }, 3000); // Уменьшили таймаут до 3с для лучшего UX
     });
 };
